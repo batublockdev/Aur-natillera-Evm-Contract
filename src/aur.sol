@@ -120,6 +120,13 @@ contract aurnatillera is EIP712, Ownable {
         }
         _;
     }
+    //asinamos multas o no y cuanto es el porcentaje de multa
+    //tenemos que setear el amount
+    //29/30 =0.999 y el memeber period es 0, es decir casi terminamos el primer periodo y no ha pagado
+    //29/30 =0.999 y el memeber period es 1, es decir aun casi terminamos el primer periodo y esta al dia
+    //Miembros para estar al dia tienen que estar adelante del periodo si es periodo 0, deben esta 1
+    //si estan periodo 2 y member 0 se esta atrasado 2
+    //Al menos establecer que miembro atrasado no recibe dinero
 
     constructor(
         address _moneyAddr
@@ -168,7 +175,11 @@ contract aurnatillera is EIP712, Ownable {
     //We need a rebase token to check the turns
     //We need to verify members
     function myTurn() external {}
-    function updateMember() external {}
+    function updateMember() external {
+        if (s_members_addr[msg.sender] == 0) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+    }
     function addMember(
         uint256 id,
         address addr,
@@ -205,7 +216,7 @@ contract aurnatillera is EIP712, Ownable {
         s_nonce++;
     }
     function period() internal view returns (uint256) {
-        return (s_time - block.timestamp) / (30 days);
+        return (block.timestamp - s_time) / (30 days);
     }
     //80% thresold
     //80% thresold
