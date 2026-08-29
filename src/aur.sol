@@ -55,6 +55,7 @@ contract aurnatillera is EIP712, Ownable {
     error Wallet_SignatureInvalid();
     error Wallet_TransferFailed();
     error Natillera_Status_Error(uint256 status);
+    error Natillera_Member_Status_Late(uint256 id);
 
     /**
      * @dev This modifier checks if the amount is not zero.
@@ -72,10 +73,8 @@ contract aurnatillera is EIP712, Ownable {
 
     NatilleraStatus private s_natillera_status;
 
-    mapping(address => uint256) private s_members_addr;
-    mapping(address => uint256) private s_members_smartContract_addr;
     mapping(uint256 => MemberData) private s_members_id;
-    mapping(address => MemberStatus) private s_members_status;
+    mapping(address addr => uint256 id) private s_members_addr;
 
     using ECDSA for bytes32;
 
@@ -105,7 +104,6 @@ contract aurnatillera is EIP712, Ownable {
         address SmartContract;
         uint256 turn;
         uint256 LatestPeriod;
-        MemberStatus status;
     }
     /**
      * @dev This modifier checks the status of the Natillera.
@@ -120,11 +118,22 @@ contract aurnatillera is EIP712, Ownable {
         }
         _;
     }
+    modifier Member_Status(uint256 id) {
+        uint256 storage s_period = period();
+        MemberData storage member = s_members_id[id];
+        if (s_period > member.LatestPeriod) {
+            //Member is late
+            //if member hasn't paid, he can't whitdraw
+            revert Natillera_Member_Status_Late(id);
+        }
+
+        _;
+    }
     //asinamos multas o no y cuanto es el porcentaje de multa
     //tenemos que setear el amount
     //29/30 =0.999 y el memeber period es 0, es decir casi terminamos el primer periodo y no ha pagado
     //29/30 =0.999 y el memeber period es 1, es decir aun casi terminamos el primer periodo y esta al dia
-    //Miembros para estar al dia tienen que estar adelante del periodo si es periodo 0, deben esta 1
+    //Miembros para estar al dia tienen  que estar adelante del periodo si es periodo 0, deben esta 1
     //si estan periodo 2 y member 0 se esta atrasado 2
     //Al menos establecer que miembro atrasado no recibe dinero
 
@@ -174,9 +183,15 @@ contract aurnatillera is EIP712, Ownable {
 
     //We need a rebase token to check the turns
     //We need to verify members
-    function myTurn() external {}
-    function updateMember() external {
-        if (s_members_addr[msg.sender] == 0) {
+    function myTurn(uint256 id) external Member_Status(id) {
+        MemberData storage member = s_members_id[id];
+        if (member.addr != msg.sender) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+    }
+    function updateMember(uint256 id) external {
+        MemberData storage member = s_members_id[id];
+        if (member.smartContract != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
     }
@@ -191,11 +206,9 @@ contract aurnatillera is EIP712, Ownable {
             addr: addr,
             smartContract: smartContract,
             turn: turn,
-            status: MemberStatus.ACTIVE,
             latestPeriod: 0
         });
         s_members_addr[addr] = id;
-        s_members_smartContract_addr[smartContract] = id;
     }
     function startNatillera() external onlyOwner {
         s_natillera_status = NatilleraStatus.STARTED;
@@ -203,13 +216,18 @@ contract aurnatillera is EIP712, Ownable {
     //Requiered verification
     //60% thresold
     function Withdraw(
+        uint256 id,
         uint256 amount,
         address token,
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) external Natillera_Status {
-        bytes32 digest = _getMessageHash(account, amount, token);
+    ) external Natillera_Status Member_Status(id) {
+        MemberData storage member = s_members_id[id];
+        if (member.addr != msg.sender) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        bytes32 digest = _getMessageHash(member.addr, amount, token);
         if (!_isValidSignature(digest, _v, _r, _s)) {
             revert Wallet_SignatureInvalid();
         }
