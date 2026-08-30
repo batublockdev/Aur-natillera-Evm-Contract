@@ -183,6 +183,10 @@ contract aurnatillera is EIP712, Ownable {
 
     //We need a rebase token to check the turns
     //We need to verify members
+    //Each member will have a turn number 1, 2 , 3 .. and can be apply each 3 periods
+    //so if memeber x has turn 2 we check if we are in period 6 or if already pass that on so he can access to the money
+    //we need a also a track to avoid doble claiming
+    // we need a funtion to restar values like period and claim+
     function myTurn(uint256 id) external Member_Status(id) {
         MemberData storage member = s_members_id[id];
         if (member.addr != msg.sender) {
@@ -195,6 +199,7 @@ contract aurnatillera is EIP712, Ownable {
             revert Wallet__SpenderNotValid(msg.sender);
         }
     }
+
     function addMember(
         uint256 id,
         address addr,
