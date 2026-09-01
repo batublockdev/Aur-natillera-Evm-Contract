@@ -56,6 +56,7 @@ contract aurnatillera is EIP712, Ownable {
     error Wallet_TransferFailed();
     error Natillera_Status_Error(uint256 status);
     error Natillera_Member_Status_Late(uint256 id);
+    error Natillera_Member_already_claim(address);
 
     /**
      * @dev This modifier checks if the amount is not zero.
@@ -68,6 +69,8 @@ contract aurnatillera is EIP712, Ownable {
     }
 
     uint256 private s_nonce;
+    uint16 private s_period_claim;
+    uint256 private s_amount;
     uint256 private s_time;
     address private immutable s_moneyAddr;
 
@@ -104,6 +107,7 @@ contract aurnatillera is EIP712, Ownable {
         address SmartContract;
         uint256 turn;
         uint256 LatestPeriod;
+        bool claim;
     }
     /**
      * @dev This modifier checks the status of the Natillera.
@@ -119,8 +123,8 @@ contract aurnatillera is EIP712, Ownable {
         _;
     }
     modifier Member_Status(uint256 id) {
-        uint256 storage s_period = period();
-        MemberData storage member = s_members_id[id];
+        uint256 memory s_period = period();
+        MemberData memory member = s_members_id[id];
         if (s_period > member.LatestPeriod) {
             //Member is late
             //if member hasn't paid, he can't whitdraw
@@ -136,13 +140,16 @@ contract aurnatillera is EIP712, Ownable {
     //Miembros para estar al dia tienen  que estar adelante del periodo si es periodo 0, deben esta 1
     //si estan periodo 2 y member 0 se esta atrasado 2
     //Al menos establecer que miembro atrasado no recibe dinero
-
+    // setear amount and periods to receive each member
     constructor(
-        address _moneyAddr
+        address _moneyAddr,
+        uint256 _amount,
+        uint16 _period_claim
     ) EIP712("Natillera", "1.0") Ownable(msg.sender) {
         s_moneyAddr = _moneyAddr;
         s_natillera_status = NatilleraStatus.SETTING;
         s_time = block.timestamp;
+        s_period_claim = _period_claim;
     }
 
     ////////////////////////////////
@@ -187,11 +194,29 @@ contract aurnatillera is EIP712, Ownable {
     //so if memeber x has turn 2 we check if we are in period 6 or if already pass that on so he can access to the money
     //we need a also a track to avoid doble claiming
     // we need a funtion to restar values like period and claim+
-    function myTurn(uint256 id) external Member_Status(id) {
-        MemberData storage member = s_members_id[id];
+    //We want this to happen in a especific order because of the birthdays
+    //otherwise we need to add a ramdoness feature can be from chainlink
+    function myTurn(uint256 id) external {
+        MemberData memory member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
+        //if is_myTurn()
+        //transfer
+    }
+    function is_myTurn(
+        uint256 id
+    ) external view Member_Status(id) returns (bool) {
+        MemberData memory member = s_members_id[id];
+        if (member.claim == true) {
+            revert Natillera_Member_already_claim(msg.sender);
+        }
+        uint256 memory s_period = period();
+        bool ismyturn = false;
+        if (s_period < (s_period_claim * member.turn)) {
+            ismyturn = true;
+        }
+        return ismyturn;
     }
     function updateMember(uint256 id) external {
         MemberData storage member = s_members_id[id];
@@ -199,6 +224,7 @@ contract aurnatillera is EIP712, Ownable {
             revert Wallet__SpenderNotValid(msg.sender);
         }
     }
+    function reStart() external onlyOwner {}
 
     function addMember(
         uint256 id,
@@ -220,6 +246,8 @@ contract aurnatillera is EIP712, Ownable {
     }
     //Requiered verification
     //60% thresold
+    //Memory copia temporal
+    //storage address real
     function Withdraw(
         uint256 id,
         uint256 amount,
@@ -228,7 +256,7 @@ contract aurnatillera is EIP712, Ownable {
         bytes32 _r,
         bytes32 _s
     ) external Natillera_Status Member_Status(id) {
-        MemberData storage member = s_members_id[id];
+        MemberData memory member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
