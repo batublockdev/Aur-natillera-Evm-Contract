@@ -57,6 +57,7 @@ contract aurnatillera is EIP712, Ownable {
     error Natillera_Status_Error(uint256 status);
     error Natillera_Member_Status_Late(uint256 id);
     error Natillera_Member_already_claim(address);
+    error Natillera_Member_not_yourTurn(address);
 
     /**
      * @dev This modifier checks if the amount is not zero.
@@ -67,9 +68,8 @@ contract aurnatillera is EIP712, Ownable {
         if (amount == 0) revert Wallet_CantBeZero();
         _;
     }
-
     uint256 private s_nonce;
-    uint16 private s_period_claim;
+    uint16 private s_periods_claim;
     uint256 private s_amount;
     uint256 private s_time;
     address private immutable s_moneyAddr;
@@ -78,6 +78,8 @@ contract aurnatillera is EIP712, Ownable {
 
     mapping(uint256 => MemberData) private s_members_id;
     mapping(address addr => uint256 id) private s_members_addr;
+    mapping(uint64 id => uint64 turn) private s_members_turn;
+    uint64[] private membersId;
 
     using ECDSA for bytes32;
 
@@ -123,11 +125,8 @@ contract aurnatillera is EIP712, Ownable {
         _;
     }
     modifier Member_Status(uint256 id) {
-        uint256 memory s_period = period();
-        MemberData memory member = s_members_id[id];
-        if (s_period > member.LatestPeriod) {
-            //Member is late
-            //if member hasn't paid, he can't whitdraw
+        int168 periodMember = member_Status(id);
+        if (periodMember < 0) {
             revert Natillera_Member_Status_Late(id);
         }
 
@@ -141,15 +140,16 @@ contract aurnatillera is EIP712, Ownable {
     //si estan periodo 2 y member 0 se esta atrasado 2
     //Al menos establecer que miembro atrasado no recibe dinero
     // setear amount and periods to receive each member
+    //we check if in the first periods the payments are not enough we declare  it inative
     constructor(
         address _moneyAddr,
         uint256 _amount,
-        uint16 _period_claim
+        uint16 _periods_claim
     ) EIP712("Natillera", "1.0") Ownable(msg.sender) {
         s_moneyAddr = _moneyAddr;
         s_natillera_status = NatilleraStatus.SETTING;
         s_time = block.timestamp;
-        s_period_claim = _period_claim;
+        s_periods_claim = _periods_claim;
     }
 
     ////////////////////////////////
@@ -187,6 +187,69 @@ contract aurnatillera is EIP712, Ownable {
         member.latestPeriod++;
         s_members_id[id] = member;
     }
+    function is_myTurn(uint256 id) internal Member_Status(id) returns (bool) {
+        MemberData memory member = s_members_id[id];
+        uint64 turn = s_members_turn[id];
+        if (member.claim == true) {
+            revert Natillera_Member_already_claim(msg.sender);
+        }
+        uint256 memory s_period = period();
+        bool ismyturn = false;
+        if (s_period < (s_periods_claim * turn)) {
+            ismyturn = true;
+        }
+        return ismyturn;
+    }
+    //we check member status
+    //member no active can't withdraw
+    //so if there are just
+    //if we got
+    function members_status() internal view returns (uint64) {
+        uint64 numberActiveMember;
+        for (uint256 index = 0; turn < membersId.length; index++) {
+            int168 periodMember = member_Status(membersId[index]);
+            if (periodMember > 0) {
+                numberActiveMember++;
+            }
+        }
+        return numberActiveMember;
+    }
+    function member_Status(uint256 id) internal returns (int168) {
+        int168 periods;
+        uint256 memory s_period = period();
+        MemberData memory member = s_members_id[id];
+        periods = s_period - member.LatestPeriod;
+        return periods;
+    }
+    function is_myTurn_ext(uint256 id) external view returns (bool) {
+        bool memory turn = is_myTurn(id);
+        return turn;
+    }
+    /**
+    This are changes whihc are going to be available during the setting state
+    to restart or start we need to make sure all memeber agree so we need 100% signs
+
+    deleteMember()
+changeRules()
+changeAmount()
+changePeriods()
+changeTurns()
+cancelNatillera()
+emergencyWithdraw() 
+        enum action_id {
+        deleteMember?,
+        changeAmount,
+        changePeriods,
+        changeTurns?,
+        emergencyWithdraw
+    }
+    struct CheckClaim {
+        uint18 Action_identifier;
+        address spender/membertoEliminate/x;
+        uint256 value;
+        uint256 nonce;
+        uint256 deadline;
+    }*/
 
     //We need a rebase token to check the turns
     //We need to verify members
@@ -196,28 +259,41 @@ contract aurnatillera is EIP712, Ownable {
     // we need a funtion to restar values like period and claim+
     //We want this to happen in a especific order because of the birthdays
     //otherwise we need to add a ramdoness feature can be from chainlink
-    function myTurn(uint256 id) external {
+    function setTurnOrder(item) internal {
+        // validar IDs
+        // validar duplicados
+        // validar cantidad
+        // asignar turn
+        // go from left to right and start on the item to save gas
+        for (uint256 index = 0; turn < membersId.length; index++) {
+            int168 periodMember = member_Status(membersId[index]);
+            if (periodMember > 0) {
+                numberActiveMember++;
+            }
+        }
+    }
+    function DeleteMember(uint256 id) internal {
+        uint64 item = s_members_turn[id];
+        item--;
+        for (uint256 index = item; turn < membersId.length; index++) {
+            membersId
+        }
+    }
+    function claim_myTurn(uint256 id) external {
         MemberData memory member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
-        //if is_myTurn()
-        //transfer
-    }
-    function is_myTurn(
-        uint256 id
-    ) external view Member_Status(id) returns (bool) {
-        MemberData memory member = s_members_id[id];
-        if (member.claim == true) {
-            revert Natillera_Member_already_claim(msg.sender);
+        bool memory m_ismyturn = is_myTurn(id);
+        if (m_ismyturn == false) {
+            revert Natillera_Member_not_yourTurn(msg.sender);
         }
-        uint256 memory s_period = period();
-        bool ismyturn = false;
-        if (s_period < (s_period_claim * member.turn)) {
-            ismyturn = true;
-        }
-        return ismyturn;
+        IERC20(s_moneyAddr).safeTransfer(
+            msg.sender,
+            (s_amount * s_total_member * s_periods_claim)
+        );
     }
+
     function updateMember(uint256 id) external {
         MemberData storage member = s_members_id[id];
         if (member.smartContract != msg.sender) {
@@ -236,10 +312,12 @@ contract aurnatillera is EIP712, Ownable {
             id: id,
             addr: addr,
             smartContract: smartContract,
-            turn: turn,
             latestPeriod: 0
         });
         s_members_addr[addr] = id;
+        s_total_member++;
+        s_members_turn[id] = s_total_member;
+        membersId.push(id);
     }
     function startNatillera() external onlyOwner {
         s_natillera_status = NatilleraStatus.STARTED;
