@@ -58,17 +58,10 @@ contract aurnatillera is EIP712, Ownable {
     error Natillera_Member_Status_Late(uint256 id);
     error Natillera_Member_already_claim(address);
     error Natillera_Member_not_yourTurn(address);
+    error Natillera_Wrong_Amount(uint256);
 
-    /**
-     * @dev This modifier checks if the amount is not zero.
-     * If it is zero, it reverts with a custom error.
-     * @param amount The amount to check.
-     */
-    modifier cantbezero(uint256 amount) {
-        if (amount == 0) revert Wallet_CantBeZero();
-        _;
-    }
     uint256 private s_nonce;
+    uint256 private s_amount_late;
     uint16 private s_periods_claim;
     uint256 private s_amount;
     uint256 private s_time;
@@ -109,6 +102,7 @@ contract aurnatillera is EIP712, Ownable {
         address SmartContract;
         uint256 turn;
         uint256 LatestPeriod;
+        uint256 pendingClaim;
         bool claim;
     }
     /**
@@ -147,6 +141,7 @@ contract aurnatillera is EIP712, Ownable {
         uint16 _periods_claim
     ) EIP712("Natillera", "1.0") Ownable(msg.sender) {
         s_moneyAddr = _moneyAddr;
+        s_amount = _amount;
         s_natillera_status = NatilleraStatus.SETTING;
         s_time = block.timestamp;
         s_periods_claim = _periods_claim;
@@ -170,7 +165,12 @@ contract aurnatillera is EIP712, Ownable {
     function deposit_token(
         uint256 amount,
         uint256 id
-    ) external cantbezero(amount) Natillera_Status {
+    ) external Natillera_Status {
+        MemberData storage member = s_members_id[id];
+        if (member.addr == address(0)) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        if (amount == 0 || amount < s_amount) revert Natillera_Wrong_Amount();
         if (IERC20(s_moneyAddr).allowance(msg.sender, address(this)) < amount) {
             revert Wallet__NotApprovedForToken(s_moneyAddr);
         }
@@ -183,23 +183,17 @@ contract aurnatillera is EIP712, Ownable {
         ) {
             revert Wallet__FaildReceiveToken(s_moneyAddr);
         }
-        MemberData storage member = s_members_id[id];
+        //check if the payment has been done late
+        //even to inform that payment has been done late
+        int168 periodMember = member_Status(id);
+        if (periodMember < 0) {
+            s_amount_late += amount;
+        }
+
         member.latestPeriod++;
         s_members_id[id] = member;
     }
-    function is_myTurn(uint256 id) internal Member_Status(id) returns (bool) {
-        MemberData memory member = s_members_id[id];
-        uint64 turn = s_members_turn[id];
-        if (member.claim == true) {
-            revert Natillera_Member_already_claim(msg.sender);
-        }
-        uint256 memory s_period = period();
-        bool ismyturn = false;
-        if (s_period < (s_periods_claim * turn)) {
-            ismyturn = true;
-        }
-        return ismyturn;
-    }
+
     //we check member status
     //member no active can't withdraw
     //so if there are just
@@ -276,11 +270,11 @@ emergencyWithdraw()
         uint64 item = s_members_turn[id];
         item--;
         for (uint256 index = item; turn < membersId.length; index++) {
-            membersId
+            membersId;
         }
     }
     function claim_myTurn(uint256 id) external {
-        MemberData memory member = s_members_id[id];
+        MemberData storage member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
@@ -288,10 +282,37 @@ emergencyWithdraw()
         if (m_ismyturn == false) {
             revert Natillera_Member_not_yourTurn(msg.sender);
         }
-        IERC20(s_moneyAddr).safeTransfer(
-            msg.sender,
-            (s_amount * s_total_member * s_periods_claim)
-        );
+        if (member.claim == true) {
+            if (member.pendingClaim == 0) {
+                revert Wallet__SpenderNotValid(msg.sender);
+            }
+        }
+
+        uint256 balanceContract = IERC20.balanceOf(address(this));
+        //We must make sure perios to calim is not 0 also amou
+
+        if (member.pendingClaim == 0) {
+            if (
+                balanceContract < (s_amount * s_total_member * s_periods_claim)
+            ) {
+                //no tenemos lo suficiente para pagar
+            } else {}
+            IERC20(s_moneyAddr).safeTransfer(
+                msg.sender,
+                (s_amount * s_total_member * s_periods_claim)
+            );
+        } else {
+            uint256 withdrawPending = member.pendingClaim;
+
+            if (member.pendingClaim > s_amount_late) {
+                withdrawPending = s_amount_late;
+                member.pendingClaim = member.pendingClaim - s_amount_late;
+            }
+            IERC20(s_moneyAddr).safeTransfer(msg.sender, (withdrawPending));
+        }
+
+        member.claim = true;
+        s_members_id[id] = member;
     }
 
     function updateMember(uint256 id) external {
@@ -404,6 +425,19 @@ emergencyWithdraw()
 
         ) = ECDSA.tryRecover(digest, _v, _r, _s);
         return (actualSigner == i_owner);
+    }
+    function is_myTurn(uint256 id) internal Member_Status(id) returns (bool) {
+        MemberData memory member = s_members_id[id];
+        uint64 turn = s_members_turn[id];
+        if (member.claim == true) {
+            revert Natillera_Member_already_claim(msg.sender);
+        }
+        uint256 memory s_period = period();
+        bool ismyturn = false;
+        if (s_period < (s_periods_claim * turn)) {
+            ismyturn = true;
+        }
+        return ismyturn;
     }
     //////////////////////////
     ////// VIEW FUNCTIONS ////
