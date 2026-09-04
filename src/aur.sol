@@ -61,6 +61,7 @@ contract aurnatillera is EIP712, Ownable {
     error Natillera_Wrong_Amount(uint256);
 
     uint256 private s_nonce;
+    uint256 private s_total_member;
     uint256 private s_amount_late;
     uint16 private s_periods_claim;
     uint256 private s_amount;
@@ -200,9 +201,9 @@ contract aurnatillera is EIP712, Ownable {
     //if we got
     function members_status() internal view returns (uint64) {
         uint64 numberActiveMember;
-        for (uint256 index = 0; turn < membersId.length; index++) {
+        for (uint256 index = 0; membersId.length; index++) {
             int168 periodMember = member_Status(membersId[index]);
-            if (periodMember > 0) {
+            if (periodMember >= 0) {
                 numberActiveMember++;
             }
         }
@@ -253,18 +254,17 @@ emergencyWithdraw()
     // we need a funtion to restar values like period and claim+
     //We want this to happen in a especific order because of the birthdays
     //otherwise we need to add a ramdoness feature can be from chainlink
-    function setTurnOrder(item) internal {
+    function setTurnOrder(uint256 item) internal {
         // validar IDs
         // validar duplicados
         // validar cantidad
         // asignar turn
         // go from left to right and start on the item to save gas
-        for (uint256 index = 0; turn < membersId.length; index++) {
-            int168 periodMember = member_Status(membersId[index]);
-            if (periodMember > 0) {
-                numberActiveMember++;
-            }
+        for (uint256 index = item; membersId.length - 1; index++) {
+            membersId[index] = membersId[index + 1];
+            s_members_turn
         }
+        membersId.pop();
     }
     function DeleteMember(uint256 id) internal {
         uint64 item = s_members_turn[id];
@@ -288,18 +288,22 @@ emergencyWithdraw()
             }
         }
 
-        uint256 balanceContract = IERC20.balanceOf(address(this));
         //We must make sure perios to calim is not 0 also amou
 
         if (member.pendingClaim == 0) {
-            if (
-                balanceContract < (s_amount * s_total_member * s_periods_claim)
-            ) {
+            uint64 ActiveMembers = members_status();
+            //check if all the memeber are active, if not it means that they will be pending money
+            if ((ActiveMembers != s_total_member)) {
                 //no tenemos lo suficiente para pagar
-            } else {}
+                uint256 pendingMoney = (s_amount *
+                    s_total_member *
+                    s_periods_claim) -
+                    (s_amount * ActiveMembers * s_periods_claim);
+                member.pendingClaim = pendingMoney;
+            }
             IERC20(s_moneyAddr).safeTransfer(
                 msg.sender,
-                (s_amount * s_total_member * s_periods_claim)
+                (s_amount * ActiveMembers * s_periods_claim)
             );
         } else {
             uint256 withdrawPending = member.pendingClaim;
