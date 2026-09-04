@@ -255,25 +255,39 @@ emergencyWithdraw()
     //We want this to happen in a especific order because of the birthdays
     //otherwise we need to add a ramdoness feature can be from chainlink
     function setTurnOrder(uint256 item) internal {
-        // validar IDs
-        // validar duplicados
-        // validar cantidad
-        // asignar turn
-        // go from left to right and start on the item to save gas
         for (uint256 index = item; membersId.length - 1; index++) {
             membersId[index] = membersId[index + 1];
-            s_members_turn
+            s_members_turn[membersId[index + 1]] = index + 1;
         }
         membersId.pop();
+    }
+    function changeAmount(uint256 newAmount) external {
+        uint256 id = s_members_addr[msg.sender];
+        if (id == 0) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        if (newAmount == 0) revert Wallet_CantBeZero();
+        s_amount = newAmount;
+    }
+    function changePeriods(uint256 newPeriods) external {
+        uint256 id = s_members_addr[msg.sender];
+        if (id == 0) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        if (newPeriods == 0) revert Wallet_CantBeZero();
+        s_periods_claim = newPeriods;
+    }
+    function changeTurns(uint256 id, uint256 newTurn) internal {
+        uint64 item = s_members_turn[id];
+        item--;
+        setTurnOrder(item);
     }
     function DeleteMember(uint256 id) internal {
         uint64 item = s_members_turn[id];
         item--;
-        for (uint256 index = item; turn < membersId.length; index++) {
-            membersId;
-        }
+        setTurnOrder(item);
     }
-    function claim_myTurn(uint256 id) external {
+    function claim_myTurn(uint256 id) external Member_Status {
         MemberData storage member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
@@ -325,7 +339,8 @@ emergencyWithdraw()
             revert Wallet__SpenderNotValid(msg.sender);
         }
     }
-    function reStart() external onlyOwner {}
+    function reStart() external {}
+    function getData() external {}
 
     function addMember(
         uint256 id,
@@ -354,7 +369,6 @@ emergencyWithdraw()
     function Withdraw(
         uint256 id,
         uint256 amount,
-        address token,
         uint8 _v,
         bytes32 _r,
         bytes32 _s
@@ -363,7 +377,7 @@ emergencyWithdraw()
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
-        bytes32 digest = _getMessageHash(member.addr, amount, token);
+        bytes32 digest = _getMessageHash(member.addr, amount);
         if (!_isValidSignature(digest, _v, _r, _s)) {
             revert Wallet_SignatureInvalid();
         }
