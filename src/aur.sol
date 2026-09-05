@@ -17,7 +17,7 @@ import {
 } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 /*
-    @title Natillera
+    @title aur
     @author batublockdev
     @notice This contract is a natillera contract which brings onchain the most commun saving mechanism in latin america.
      It allows a group of people to save money together and withdraw it in turns. The contract is designed to be used by 
@@ -25,7 +25,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
     @dev This contract is a work in progress and is not yet complete. It is not yet audited and should not be used in production.
 */
 
-contract aurnatillera is EIP712, Ownable {
+contract aur is EIP712, Ownable {
     // errors
     // interfaces, libraries, contracts
 
