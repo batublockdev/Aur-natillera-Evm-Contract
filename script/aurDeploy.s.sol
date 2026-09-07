@@ -15,11 +15,11 @@ contract DeployContract is Script {
         address currencyAddress,
         uint256 amount,
         uint16 periods_claim
-    ) external returns (aur) {
+    ) external returns (aur, address) {
         vm.startBroadcast();
         sender = msg.sender;
         aur ContactAur = new aur(currencyAddress, amount, periods_claim);
         vm.stopBroadcast();
-        return (ContactAur);
+        return (ContactAur, sender);
     }
 }

@@ -52,6 +52,7 @@ contract aur is AccessControl {
     error Natillera_Member_already_claim(address);
     error Natillera_Member_not_yourTurn(address);
     error Natillera_Wrong_Amount(uint256);
+    error Natillera_Wrong_id(uint256);
 
     uint256 private s_total_member;
     uint256 private s_amount_late;
@@ -126,7 +127,7 @@ contract aur is AccessControl {
     // setear amount and periods to receive each member
     //we check if in the first periods the payments are not enough we declare  it inative
     constructor(address _moneyAddr, uint256 _amount, uint16 _periods_claim) {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(MEMBER_ROLE, msg.sender);
         s_moneyAddr = _moneyAddr;
         s_amount = _amount;
         s_natillera_status = NatilleraStatus.SETTING;
@@ -201,10 +202,7 @@ contract aur is AccessControl {
         int256 periods = int256(s_period) - int256(member.LatestPeriod);
         return periods;
     }
-    function is_myTurn_ext(uint256 id) external view returns (bool) {
-        bool turn = is_myTurn(id);
-        return turn;
-    }
+
     /**
     This are changes whihc are going to be available during the setting state
     to restart or start we need to make sure all memeber agree so we need 100% signs
@@ -272,6 +270,7 @@ emergencyWithdraw()
         item--;
         setTurnOrder(item);
     }
+    //fix and add rentrancy and cheks so on ..
     function claim_myTurn(uint256 id) external Member_Status(id) {
         MemberData storage member = s_members_id[id];
         if (member.addr != msg.sender) {
@@ -331,7 +330,16 @@ emergencyWithdraw()
         address addr,
         address smartContract
     ) external onlyRole(MEMBER_ROLE) {
-        //need add checks
+        //need to prevent same id twice
+        //Checks
+        if (id == 0) {
+            revert Natillera_Wrong_id(id);
+        }
+        if (addr == address(0) || smartContract == address(0)) {
+            revert Natillera_Wrong_id(id);
+        }
+        // EFFECTS
+        _grantRole(MEMBER_ROLE, addr);
         s_members_id[id] = MemberData({
             id: id,
             addr: addr,
@@ -379,6 +387,10 @@ emergencyWithdraw()
     //////////////////////////
     ////// VIEW FUNCTIONS ////
     //////////////////////////
+    function is_myTurn_ext(uint256 id) external view returns (bool) {
+        bool turn = is_myTurn(id);
+        return turn;
+    }
     function getData()
         external
         view
