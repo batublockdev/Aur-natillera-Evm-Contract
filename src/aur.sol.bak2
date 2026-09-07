@@ -1,38 +1,14 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.25;
+pragma solidity ^0.8.20;
 
-// Layout of Contract:
-// version
-// imports
-// errors
-// interfaces, libraries, contracts
-// Type declarations
-// State variables
-// Events
-// Modifiers
-// Functions
-
-// Layout of Functions:
-// constructor
-// receive function (if exists)
-// fallback function (if exists)
-// external
-// public
-// internal
-// private
-// view & pure functions
-
-////////////////////////////
-////// IMPORTS /////////////
-////////////////////////////
+//imports
 import {
     IERC20,
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-
 /*
     @title aur
     @author batublockdev
@@ -43,9 +19,25 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 */
 
 contract aur is AccessControl {
-    ////////////////////////////
-    ////// ERRORS //////////////
-    ////////////////////////////
+    // errors
+    // interfaces, libraries, contracts
+
+    // Type declarations
+    // State variables
+    // Events
+    // Modifiers
+    // Functions
+
+    // Layout of Functions:
+    // constructor
+    // receive function (if exists)
+    // fallback function (if exists)
+    // external
+    // public
+    // internal
+    // private
+    // view & pure functions
+
     error Wallet_CantBeZero();
     error Wallet_NotOwner();
     error Wallet_NotEnoughFunds();
@@ -65,9 +57,20 @@ contract aur is AccessControl {
     error Natillera_Wrong_Doble_id(uint256);
     error Natillera_Wrong_Doble_Address(address);
 
-    ////////////////////////////
-    ////// TYPE DECLARATIONS ///
-    ////////////////////////////
+    uint256 private s_total_member;
+    uint256 private s_amount_late;
+    uint16 private s_periods_claim;
+    uint256 private s_amount;
+    uint256 private s_time;
+    address private immutable s_moneyAddr;
+    bytes32 public constant MEMBER_ROLE = keccak256("MEMBER");
+    NatilleraStatus private s_natillera_status;
+
+    mapping(uint256 => MemberData) private s_members_id;
+    mapping(address addr => uint256 id) private s_members_addr;
+    mapping(uint256 id => uint256 turn) private s_members_turn;
+    uint256[] private membersId;
+
     enum MemberStatus {
         ACTIVE,
         INACTIVE
@@ -96,31 +99,6 @@ contract aur is AccessControl {
         uint256 pendingClaim;
         bool claim;
     }
-
-    ////////////////////////////
-    ////// STATE VARIABLES /////
-    ////////////////////////////
-    uint256 private s_total_member;
-    uint256 private s_amount_late;
-    uint16 private s_periods_claim;
-    uint256 private s_amount;
-    uint256 private s_time;
-    address private immutable s_moneyAddr;
-    bytes32 public constant MEMBER_ROLE = keccak256("MEMBER");
-    NatilleraStatus private s_natillera_status;
-
-    mapping(uint256 => MemberData) private s_members_id;
-    mapping(address addr => uint256 id) private s_members_addr;
-    mapping(uint256 id => uint256 turn) private s_members_turn;
-    uint256[] private membersId;
-
-    ////////////////////////////
-    ////// EVENTS //////////////
-    ////////////////////////////
-
-    ////////////////////////////
-    ////// MODIFIERS ///////////
-    ////////////////////////////
     /**
      * @dev This modifier checks the status of the Natillera.
      * If the status is PAUSED or SETTING, it reverts with a custom error.
@@ -134,16 +112,6 @@ contract aur is AccessControl {
         }
         _;
     }
-    /**
-     * @dev This modifier checks the status of the Natillera.
-     * If the status is STARTED it reverts with a custom error.
-     */
-    modifier Natillera_Status_Started() {
-        if (s_natillera_status == NatilleraStatus.STARTED) {
-            revert Natillera_Status_Error(uint256(s_natillera_status));
-        }
-        _;
-    }
     modifier Member_Status(uint256 id) {
         int256 periodMember = member_Status(id);
         if (periodMember < 0) {
@@ -152,14 +120,6 @@ contract aur is AccessControl {
 
         _;
     }
-
-    ////////////////////////////
-    ////// FUNCTIONS ///////////
-    ////////////////////////////
-
-    ////////////////////////////
-    ////// CONSTRUCTOR /////////
-    ////////////////////////////
     //asinamos multas o no y cuanto es el porcentaje de multa
     //tenemos que setear el amount
     //29/30 =0.999 y el memeber period es 0, es decir casi terminamos el primer periodo y no ha pagado
@@ -188,6 +148,7 @@ contract aur is AccessControl {
     ////////////////////////////////
 
     /**
+     * @param amount the amount of the token to deposit (must be >= s_amount)
      * @param id the id of the member making the deposit
      * @notice this function is used to deposit the token into the natillera
      * the member must have approved the contract to spend the token beforehand
@@ -196,22 +157,24 @@ contract aur is AccessControl {
      * the tokens from the member to the contract. If the payment is late it
      * accumulates the amount into s_amount_late
      */
-    function deposit_token(uint256 id) external Natillera_Status {
+    function deposit_token(
+        uint256 amount,
+        uint256 id
+    ) external Natillera_Status {
         MemberData storage member = s_members_id[id];
         if (member.addr == address(0)) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
-
-        if (
-            IERC20(s_moneyAddr).allowance(msg.sender, address(this)) < s_amount
-        ) {
+        if (amount == 0 || amount < s_amount)
+            revert Natillera_Wrong_Amount(amount);
+        if (IERC20(s_moneyAddr).allowance(msg.sender, address(this)) < amount) {
             revert Wallet__NotApprovedForToken(s_moneyAddr);
         }
         if (
             IERC20(s_moneyAddr).transferFrom(
                 msg.sender,
                 address(this),
-                s_amount
+                amount
             ) == false
         ) {
             revert Wallet__FaildReceiveToken(s_moneyAddr);
@@ -220,177 +183,12 @@ contract aur is AccessControl {
         //even to inform that payment has been done late
         int256 periodMember = member_Status(id);
         if (periodMember < 0) {
-            s_amount_late += s_amount;
+            s_amount_late += amount;
         }
 
         member.LatestPeriod++;
         s_members_id[id] = member;
     }
-
-    /**
-     * @param newAmount the new amount to be deposited per period
-     * @notice this function allows a member to change the amount of the natillera
-     * @dev this function checks that the caller is a member and that the new amount is not zero
-     */
-    function changeAmount(
-        uint256 newAmount
-    ) external onlyRole(MEMBER_ROLE) Natillera_Status_Started {
-        if (newAmount == 0) revert Wallet_CantBeZero();
-        s_amount = newAmount;
-    }
-    /**
-     * @param newPeriods the new number of periods each member has to wait to claim
-     * @notice this function allows a member to change the number of periods to claim
-     * @dev this function checks that the caller is a member and that the new periods are not zero
-     */
-    function changePeriods(
-        uint16 newPeriods
-    ) external onlyRole(MEMBER_ROLE) Natillera_Status_Started {
-        if (newPeriods == 0) revert Wallet_CantBeZero();
-        s_periods_claim = newPeriods;
-    }
-    //fix and add rentrancy and cheks so on ..
-    // Need to susbtract pending from total amount late
-    /**
-     * @param id the id of the member claiming their turn
-     * @notice this function allows a member to claim the money when it is their turn
-     * @dev this function checks the member status, that the caller is the member,
-     * that it is their turn and that they have not claimed before. It transfers
-     * the corresponding amount or the pending amount if some members are inactive
-     */
-    function claim_myTurn(uint256 id) external Member_Status(id) {
-        MemberData storage member = s_members_id[id];
-        if (member.addr != msg.sender) {
-            revert Wallet__SpenderNotValid(msg.sender);
-        }
-        bool m_ismyturn = is_myTurn(id);
-        if (m_ismyturn == false) {
-            revert Natillera_Member_not_yourTurn(msg.sender);
-        }
-        if (member.claim == true) {
-            if (member.pendingClaim == 0) {
-                revert Wallet__SpenderNotValid(msg.sender);
-            }
-        }
-
-        //We must make sure perios to calim is not 0 also amou
-
-        if (member.pendingClaim == 0) {
-            uint64 ActiveMembers = members_status();
-            //check if all the memeber are active, if not it means that they will be pending money
-            if ((ActiveMembers != s_total_member)) {
-                //no tenemos lo suficiente para pagar
-                uint256 pendingMoney = (s_amount *
-                    s_total_member *
-                    s_periods_claim) -
-                    (s_amount * ActiveMembers * s_periods_claim);
-                member.pendingClaim = pendingMoney;
-            }
-            IERC20(s_moneyAddr).transfer(
-                msg.sender,
-                (s_amount * ActiveMembers * s_periods_claim)
-            );
-        } else {
-            uint256 withdrawPending = member.pendingClaim;
-
-            if (member.pendingClaim > s_amount_late) {
-                withdrawPending = s_amount_late;
-                member.pendingClaim = member.pendingClaim - s_amount_late;
-            }
-            IERC20(s_moneyAddr).transfer(msg.sender, (withdrawPending));
-        }
-
-        member.claim = true;
-        s_members_id[id] = member;
-    }
-
-    /**
-     * @param id the id of the member to update
-     * @notice this function is used to update a member
-     * @dev this function checks that the caller is the smart contract associated
-     * with the member. Currently it is a placeholder and does not perform any update
-     */
-    function updateMember(uint256 id) external {
-        MemberData storage member = s_members_id[id];
-        if (member.SmartContract != msg.sender) {
-            revert Wallet__SpenderNotValid(msg.sender);
-        }
-        //here we need to gant the new one and delete the old address
-    }
-    /**
-     * @notice this function is used to restart the natillera
-     * @dev this function is currently a placeholder and does not perform any action
-     */
-    function reStart() external {}
-
-    /**
-     * @param id the id to assign to the new member
-     * @param addr the address of the new member
-     * @param smartContract the smart contract associated with the new member
-     * @notice this function adds a new member to the natillera
-     * @dev this function checks that the id and addresses are valid and not duplicated,
-     * grants the MEMBER_ROLE, stores the member data and adds them to the turn order
-     */
-    function addMember(
-        uint256 id,
-        address addr,
-        address smartContract
-    ) external onlyRole(MEMBER_ROLE) {
-        //need to prevent same id twice
-        //Checks
-        if (id == 0) {
-            revert Natillera_Wrong_id(id);
-        }
-        if (addr == address(0) || smartContract == address(0)) {
-            revert Natillera_Wrong_address(addr, smartContract);
-        }
-        if (s_members_addr[addr] != 0) {
-            revert Natillera_Wrong_Doble_Address(addr);
-        }
-        if (s_members_turn[id] != 0) {
-            revert Natillera_Wrong_Doble_id(id);
-        }
-        // EFFECTS
-        _grantRole(MEMBER_ROLE, addr);
-        s_members_id[id] = MemberData({
-            id: id,
-            addr: addr,
-            SmartContract: smartContract,
-            LatestPeriod: 0,
-            pendingClaim: 0,
-            claim: false
-        });
-        s_members_addr[addr] = id;
-        s_total_member++;
-        s_members_turn[id] = s_total_member;
-        membersId.push(id);
-    }
-    /**
-     * @notice this function starts the natillera
-     * @dev this function sets the start time and changes the status to STARTED
-     */
-    function startNatillera()
-        external
-        onlyRole(MEMBER_ROLE)
-        Natillera_Status_Started
-    {
-        s_time = block.timestamp;
-        s_natillera_status = NatilleraStatus.STARTED;
-    }
-
-    //80% thresold
-    //80% thresold
-    /**
-     * @notice this function is used to delete a member
-     * @dev this function is currently a placeholder and does not perform any action
-     */
-    function deleteMember() external {
-        // we need to remove grant role
-    }
-
-    ///////////////////////////////
-    ////// INTERNAL FUNCTIONS //////
-    ///////////////////////////////
 
     //we check member status
     //member no active can't withdraw
@@ -475,6 +273,32 @@ emergencyWithdraw()
         membersId.pop();
     }
     /**
+     * @param newAmount the new amount to be deposited per period
+     * @notice this function allows a member to change the amount of the natillera
+     * @dev this function checks that the caller is a member and that the new amount is not zero
+     */
+    function changeAmount(uint256 newAmount) external onlyRole(MEMBER_ROLE) {
+        uint256 id = s_members_addr[msg.sender];
+        if (id == 0) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        if (newAmount == 0) revert Wallet_CantBeZero();
+        s_amount = newAmount;
+    }
+    /**
+     * @param newPeriods the new number of periods each member has to wait to claim
+     * @notice this function allows a member to change the number of periods to claim
+     * @dev this function checks that the caller is a member and that the new periods are not zero
+     */
+    function changePeriods(uint16 newPeriods) external onlyRole(MEMBER_ROLE) {
+        uint256 id = s_members_addr[msg.sender];
+        if (id == 0) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        if (newPeriods == 0) revert Wallet_CantBeZero();
+        s_periods_claim = newPeriods;
+    }
+    /**
      * @param id the id of the member whose turn is going to change
      * @param newTurn the new turn position for the member
      * @notice this function changes the turn of a member in the order
@@ -495,6 +319,149 @@ emergencyWithdraw()
         item--;
         setTurnOrder(item);
     }
+    //fix and add rentrancy and cheks so on ..
+    /**
+     * @param id the id of the member claiming their turn
+     * @notice this function allows a member to claim the money when it is their turn
+     * @dev this function checks the member status, that the caller is the member,
+     * that it is their turn and that they have not claimed before. It transfers
+     * the corresponding amount or the pending amount if some members are inactive
+     */
+    function claim_myTurn(uint256 id) external Member_Status(id) {
+        MemberData storage member = s_members_id[id];
+        if (member.addr != msg.sender) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        bool m_ismyturn = is_myTurn(id);
+        if (m_ismyturn == false) {
+            revert Natillera_Member_not_yourTurn(msg.sender);
+        }
+        if (member.claim == true) {
+            if (member.pendingClaim == 0) {
+                revert Wallet__SpenderNotValid(msg.sender);
+            }
+        }
+
+        //We must make sure perios to calim is not 0 also amou
+
+        if (member.pendingClaim == 0) {
+            uint64 ActiveMembers = members_status();
+            //check if all the memeber are active, if not it means that they will be pending money
+            if ((ActiveMembers != s_total_member)) {
+                //no tenemos lo suficiente para pagar
+                uint256 pendingMoney = (s_amount *
+                    s_total_member *
+                    s_periods_claim) -
+                    (s_amount * ActiveMembers * s_periods_claim);
+                member.pendingClaim = pendingMoney;
+            }
+            IERC20(s_moneyAddr).transfer(
+                msg.sender,
+                (s_amount * ActiveMembers * s_periods_claim)
+            );
+        } else {
+            uint256 withdrawPending = member.pendingClaim;
+
+            if (member.pendingClaim > s_amount_late) {
+                withdrawPending = s_amount_late;
+                member.pendingClaim = member.pendingClaim - s_amount_late;
+            }
+            IERC20(s_moneyAddr).transfer(msg.sender, (withdrawPending));
+        }
+
+        member.claim = true;
+        s_members_id[id] = member;
+    }
+
+    /**
+     * @param id the id of the member to update
+     * @notice this function is used to update a member
+     * @dev this function checks that the caller is the smart contract associated
+     * with the member. Currently it is a placeholder and does not perform any update
+     */
+    function updateMember(uint256 id) external {
+        MemberData storage member = s_members_id[id];
+        if (member.SmartContract != msg.sender) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+    }
+    /**
+     * @notice this function is used to restart the natillera
+     * @dev this function is currently a placeholder and does not perform any action
+     */
+    function reStart() external {}
+
+    /**
+     * @param id the id to assign to the new member
+     * @param addr the address of the new member
+     * @param smartContract the smart contract associated with the new member
+     * @notice this function adds a new member to the natillera
+     * @dev this function checks that the id and addresses are valid and not duplicated,
+     * grants the MEMBER_ROLE, stores the member data and adds them to the turn order
+     */
+    function addMember(
+        uint256 id,
+        address addr,
+        address smartContract
+    ) external onlyRole(MEMBER_ROLE) {
+        //need to prevent same id twice
+        //Checks
+        if (id == 0) {
+            revert Natillera_Wrong_id(id);
+        }
+        if (addr == address(0) || smartContract == address(0)) {
+            revert Natillera_Wrong_address(addr, smartContract);
+        }
+        if (s_members_addr[addr] != 0) {
+            revert Natillera_Wrong_Doble_Address(addr);
+        }
+        if (s_members_turn[id] != 0) {
+            revert Natillera_Wrong_Doble_id(id);
+        }
+        // EFFECTS
+        _grantRole(MEMBER_ROLE, addr);
+        s_members_id[id] = MemberData({
+            id: id,
+            addr: addr,
+            SmartContract: smartContract,
+            LatestPeriod: 0,
+            pendingClaim: 0,
+            claim: false
+        });
+        s_members_addr[addr] = id;
+        s_total_member++;
+        s_members_turn[id] = s_total_member;
+        membersId.push(id);
+    }
+    /**
+     * @notice this function starts the natillera
+     * @dev this function sets the start time and changes the status to STARTED
+     */
+    function startNatillera() external onlyRole(MEMBER_ROLE) {
+        s_time = block.timestamp;
+        s_natillera_status = NatilleraStatus.STARTED;
+    }
+
+    /**
+     * @notice this function returns the current period of the natillera
+     * @dev this function calculates the number of 30 day periods that have passed
+     * since the natillera started
+     * @return the current period number
+     */
+    function period() internal view returns (uint256) {
+        return (block.timestamp - s_time) / (30 days);
+    }
+    //80% thresold
+    //80% thresold
+    /**
+     * @notice this function is used to delete a member
+     * @dev this function is currently a placeholder and does not perform any action
+     */
+    function deleteMember() external {}
+
+    ///////////////////////////////
+    ////// INTERNAL FUNCTIONS //////
+    ///////////////////////////////
 
     /**
      * @param id the id of the member to check
@@ -513,12 +480,11 @@ emergencyWithdraw()
         }
         uint256 s_period = period();
         bool ismyturn = false;
-        if (s_period >= (s_periods_claim * turn)) {
+        if (s_period < (s_periods_claim * turn)) {
             ismyturn = true;
         }
         return ismyturn;
     }
-
     //////////////////////////
     ////// VIEW FUNCTIONS ////
     //////////////////////////
@@ -580,18 +546,6 @@ emergencyWithdraw()
         return (member, turn, idx);
     }
     /**
-     * @notice this function returns the current period of the natillera
-     * @dev this function calculates the number of 30 day periods that have passed
-     * since the natillera started
-     * @return the current period number
+    
      */
-    function period() internal view returns (uint256) {
-        return (block.timestamp - s_time) / (30 days);
-    }
-    function GetPeriod() external view returns (uint256) {
-        return (period());
-    }
-    function Get_member_Status(uint256 id) external view returns (int256) {
-        return member_Status(id);
-    }
 }

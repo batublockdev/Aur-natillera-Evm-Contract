@@ -1,0 +1,260 @@
+//SPDX-License-Identifier: MIT
+
+pragma solidity ^0.8.24;
+
+import {Test, console, stdMath} from "../lib/forge-std/src/Test.sol";
+import {aur} from "../src/aur.sol";
+import {ERC20Mock} from "./mock/ERC20Mock.sol";
+import {DeployContract} from "../script/aurDeploy.s.sol";
+import {console} from "../lib/forge-std/src/console.sol";
+
+contract aurTest is Test {
+    //USERS
+    address public member1 = makeAddr("member1");
+    address public member2 = makeAddr("member2");
+    address public member3 = makeAddr("member3");
+    address public member4 = makeAddr("member4");
+    address public member5 = makeAddr("member5");
+    address public NoMember = makeAddr("memberx");
+
+    ERC20Mock usdc;
+    uint256 public loanId;
+
+    aur private aurContract;
+    DeployContract deploy;
+
+    uint256 MAX_DEPOSIT_SIZE = type(uint96).max;
+
+    function setUp() public {
+        usdc = new ERC20Mock("USD DOLLAR", "USDC", 100 ether, member1);
+        usdc.mint(member2, 100 ether);
+        usdc.mint(member3, 100 ether);
+        usdc.mint(member4, 100 ether);
+        usdc.mint(member5, 100 ether);
+
+        deploy = new DeployContract();
+        vm.prank(member1);
+        aurContract = new aur(address(usdc), 10 ether, 3);
+    }
+    //////////////////////////
+    ////// CONSTRUCTION FUNCTION ////
+    //////////////////////////
+    /**
+    @dev We test the cheks in the constroction funtion like address 0
+     */
+    function test_constructor_checks() public {
+        //Test address 0
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Wrong_address.selector,
+                address(0),
+                address(0)
+            )
+        );
+        aurContract = new aur(address(0), 10 ether, 3);
+
+        //Test amount 0
+        vm.prank(member1);
+        vm.expectRevert(abi.encodeWithSelector(aur.Wallet_CantBeZero.selector));
+        aurContract = new aur(address(usdc), 0, 3);
+
+        //Test peridos 0
+        vm.prank(member1);
+        vm.expectRevert(abi.encodeWithSelector(aur.Wallet_CantBeZero.selector));
+        aurContract = new aur(address(usdc), 20, 0);
+
+        //Test both 0
+        vm.prank(member1);
+        vm.expectRevert(abi.encodeWithSelector(aur.Wallet_CantBeZero.selector));
+        aurContract = new aur(address(usdc), 0, 0);
+    }
+    /**
+    @dev We chek if the data added in the constructor on the setup  has been added
+     */
+    function test_constructor_Effects() public {
+        // data inserted in the set up   aurContract = new aur(address(usdc), 10 ether, 3);
+        (
+            uint256 totalMember,
+            uint256 amountLate,
+            uint16 periodsClaim,
+            uint256 amount,
+            uint256 time,
+            address moneyAddr,
+            uint256 status,
+            uint256[] memory members
+        ) = aurContract.getData();
+
+        console.log("totalMember:", totalMember);
+        console.log("amountLate:", amountLate);
+        console.log("periodsClaim:", periodsClaim);
+        console.log("amount:", amount);
+        console.log("time:", time);
+        console.log("moneyAddr:", moneyAddr);
+        console.log("status:", status);
+
+        console.log("members length:", members.length);
+
+        for (uint256 i = 0; i < members.length; i++) {
+            console.log("member ID:", members[i]);
+        }
+
+        assertEq(totalMember, 0);
+        assertEq(members.length, 0);
+        assertEq(amountLate, 0);
+        assertEq(periodsClaim, 3);
+        assertEq(amount, 10 ether);
+        assertEq(time, 0);
+        assertEq(moneyAddr, address(usdc));
+        // expect the contract to be in setting  which is 2
+        assertEq(status, uint256(2));
+    }
+    //////////////////////////
+    ////// ADDMEMBER FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test the role error, preventing users externos from gettins access to funtions
+     */
+    function test_addMember_MemberError() public {
+        vm.prank(member1);
+        aurContract.addMember(2222222, address(member1), address(member1));
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                address(this),
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        aurContract.addMember(100111, address(member2), address(member2));
+    }
+    /**
+        @dev Test all checks, like adding empty data or the same address twice
+     */
+    function test_addMember_Checks() public {
+        // Test id o
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(aur.Natillera_Wrong_id.selector, uint256(0))
+        );
+        aurContract.addMember(0, address(member1), address(member1));
+
+        // Test address o
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Wrong_address.selector,
+                address(0),
+                address(member1)
+            )
+        );
+        aurContract.addMember(5113123, address(0), address(member1));
+
+        // Test address smartcontract o
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Wrong_address.selector,
+                address(member1),
+                address(0)
+            )
+        );
+        aurContract.addMember(5113123, address(member1), address(0));
+
+        // Test address smartcontract o and address o
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Wrong_address.selector,
+                address(0),
+                address(0)
+            )
+        );
+        aurContract.addMember(5113123, address(0), address(0));
+
+        // Test sending same address twice
+        //First time
+        vm.prank(member1);
+        aurContract.addMember(5113123, address(member1), address(member1));
+
+        //Second time
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Wrong_Doble_Address.selector,
+                address(member1)
+            )
+        );
+        aurContract.addMember(5113123, address(member1), address(member1));
+
+        // Test sending same id twice
+        //First time
+        vm.prank(member1);
+        aurContract.addMember(51131232, address(member2), address(member2));
+
+        //Second time
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Wrong_Doble_id.selector,
+                uint256(51131232)
+            )
+        );
+        aurContract.addMember(51131232, address(member3), address(member3));
+    }
+    /**
+        @dev Test the effects check if the data has been added
+     */
+    function test_addMember_Effects() public {
+        vm.prank(member1);
+        aurContract.addMember(51131232, address(member1), address(member1));
+
+        (aur.MemberData memory member, uint256 turn, uint256 id) = aurContract
+            .getdataMember(51131232);
+
+        console.log("----- MEMBER -----");
+        console.log("ID:", member.id);
+        console.log("Address:", member.addr);
+        console.log("SmartContract:", member.SmartContract);
+        console.log("LatestPeriod:", member.LatestPeriod);
+        console.log("PendingClaim:", member.pendingClaim);
+        console.log("Claim:", member.claim);
+
+        console.log("Turn:", turn);
+        console.log("Id:", id);
+
+        assertEq(member.id, 51131232);
+        assertEq(id, 51131232);
+        assertEq(member.addr, address(member1));
+        assertEq(member.SmartContract, address(member1));
+        assertEq(member.LatestPeriod, 0);
+        assertEq(member.pendingClaim, 0);
+        assertEq(turn, 1);
+
+        assertFalse(member.claim);
+
+        (
+            uint256 totalMember,
+            uint256 amountLate,
+            uint16 periodsClaim,
+            uint256 amount,
+            uint256 time,
+            address moneyAddr,
+            uint256 status,
+            uint256[] memory members
+        ) = aurContract.getData();
+
+        console.log("totalMember:", totalMember);
+        console.log("amountLate:", amountLate);
+        console.log("periodsClaim:", periodsClaim);
+        console.log("amount:", amount);
+        console.log("time:", time);
+        console.log("moneyAddr:", moneyAddr);
+        console.log("status:", status);
+
+        console.log("members length:", members.length);
+
+        for (uint256 i = 0; i < members.length; i++) {
+            console.log("member ID:", members[i]);
+        }
+    }
+}
