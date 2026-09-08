@@ -32,7 +32,9 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-
+import {
+    ReentrancyGuard
+} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /*
     @title aur
     @author batublockdev
@@ -42,7 +44,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
     @dev This contract is a work in progress and is not yet complete. It is not yet audited and should not be used in production.
 */
 
-contract aur is AccessControl {
+contract aur is AccessControl, ReentrancyGuard {
     ////////////////////////////
     ////// ERRORS //////////////
     ////////////////////////////
@@ -68,6 +70,7 @@ contract aur is AccessControl {
     ////////////////////////////
     ////// TYPE DECLARATIONS ///
     ////////////////////////////
+    using SafeERC20 for IERC20;
     enum MemberStatus {
         ACTIVE,
         INACTIVE
@@ -92,7 +95,7 @@ contract aur is AccessControl {
         uint256 id;
         address addr;
         address SmartContract;
-        uint256 LatestPeriod;
+        uint64 LatestPeriod;
         uint256 pendingClaim;
         bool claim;
     }
@@ -109,9 +112,12 @@ contract aur is AccessControl {
     bytes32 public constant MEMBER_ROLE = keccak256("MEMBER");
     NatilleraStatus private s_natillera_status;
 
+    mapping(uint64 period => uint256 colleted) private s_amount_colleted;
+    mapping(uint64 period => uint256 colleted) private s_amount_late_colleted;
+
     mapping(uint256 => MemberData) private s_members_id;
     mapping(address addr => uint256 id) private s_members_addr;
-    mapping(uint256 id => uint256 turn) private s_members_turn;
+    mapping(uint256 id => uint64 turn) private s_members_turn;
     uint256[] private membersId;
 
     ////////////////////////////
@@ -207,23 +213,23 @@ contract aur is AccessControl {
         ) {
             revert Wallet__NotApprovedForToken(s_moneyAddr);
         }
-        if (
-            IERC20(s_moneyAddr).transferFrom(
-                msg.sender,
-                address(this),
-                s_amount
-            ) == false
-        ) {
-            revert Wallet__FaildReceiveToken(s_moneyAddr);
-        }
+        IERC20(s_moneyAddr).safeTransferFrom(
+            msg.sender,
+            address(this),
+            s_amount
+        );
+
         //check if the payment has been done late
         //even to inform that payment has been done late
         int256 periodMember = member_Status(id);
+        member.LatestPeriod++;
+
         if (periodMember < 0) {
-            s_amount_late += s_amount;
+            s_amount_late_colleted[member.LatestPeriod] += s_amount;
+        } else {
+            s_amount_colleted[member.LatestPeriod] += s_amount;
         }
 
-        member.LatestPeriod++;
         s_members_id[id] = member;
     }
 
@@ -258,7 +264,10 @@ contract aur is AccessControl {
      * that it is their turn and that they have not claimed before. It transfers
      * the corresponding amount or the pending amount if some members are inactive
      */
-    function claim_myTurn(uint256 id) external Member_Status(id) {
+    function claim_myTurn(
+        uint256 id
+    ) external Member_Status(id) onlyRole(MEMBER_ROLE) nonReentrant {
+        //Cheks
         MemberData storage member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
@@ -269,39 +278,46 @@ contract aur is AccessControl {
         }
         if (member.claim == true) {
             if (member.pendingClaim == 0) {
-                revert Wallet__SpenderNotValid(msg.sender);
+                revert Natillera_Member_already_claim(msg.sender);
             }
         }
-
-        //We must make sure perios to calim is not 0 also amou
+        //Effects
+        uint256 amountToWithdraw;
+        (
+            uint256 amountColleted,
+            uint256 amountColletedLate
+        ) = collected_forTurn(s_members_turn[id]);
 
         if (member.pendingClaim == 0) {
             uint64 ActiveMembers = members_status();
             //check if all the memeber are active, if not it means that they will be pending money
             if ((ActiveMembers != s_total_member)) {
-                //no tenemos lo suficiente para pagar
+                //We don't have enough to pay
                 uint256 pendingMoney = (s_amount *
                     s_total_member *
                     s_periods_claim) -
-                    (s_amount * ActiveMembers * s_periods_claim);
+                    (s_amount * amountColleted * s_periods_claim);
                 member.pendingClaim = pendingMoney;
             }
-            IERC20(s_moneyAddr).transfer(
-                msg.sender,
-                (s_amount * ActiveMembers * s_periods_claim)
-            );
+            amountToWithdraw = (s_amount * amountColleted * s_periods_claim);
         } else {
             uint256 withdrawPending = member.pendingClaim;
 
-            if (member.pendingClaim > s_amount_late) {
-                withdrawPending = s_amount_late;
-                member.pendingClaim = member.pendingClaim - s_amount_late;
+            if (member.pendingClaim > amountColletedLate) {
+                //We don't have enough to pay
+                withdrawPending = amountColletedLate;
+                member.pendingClaim = member.pendingClaim - amountColletedLate;
+                //Clean amount colleted late
+            } else {
+                //Clean amount colleted late
             }
-            IERC20(s_moneyAddr).transfer(msg.sender, (withdrawPending));
+            amountToWithdraw = withdrawPending;
         }
 
         member.claim = true;
         s_members_id[id] = member;
+        //Interactions
+        IERC20(s_moneyAddr).safeTransfer(msg.sender, amountToWithdraw);
     }
 
     /**
@@ -362,7 +378,7 @@ contract aur is AccessControl {
         });
         s_members_addr[addr] = id;
         s_total_member++;
-        s_members_turn[id] = s_total_member;
+        s_members_turn[id] = uint64(s_total_member);
         membersId.push(id);
     }
     /**
@@ -405,7 +421,8 @@ contract aur is AccessControl {
      */
     function members_status() internal view returns (uint64) {
         uint64 numberActiveMember;
-        for (uint256 index = 0; index > membersId.length; index++) {
+
+        for (uint256 index = 0; index < membersId.length; index++) {
             int256 periodMember = member_Status(membersId[index]);
             if (periodMember >= 0) {
                 numberActiveMember++;
@@ -413,6 +430,23 @@ contract aur is AccessControl {
         }
         return numberActiveMember;
     }
+    function collected_forTurn(
+        uint64 turn
+    ) internal view returns (uint256, uint256) {
+        uint256 total_Collated;
+        uint256 total_Collated_Late;
+
+        for (
+            uint64 index = turn * s_periods_claim;
+            index >= (turn * s_periods_claim) - s_periods_claim + 1;
+            index--
+        ) {
+            total_Collated += s_amount_colleted[index];
+            total_Collated_Late += s_amount_late_colleted[index];
+        }
+        return (total_Collated, total_Collated_Late);
+    }
+
     /**
      * @param id the id of the member to check
      * @notice this function returns how many periods a member is behind or ahead
@@ -423,7 +457,7 @@ contract aur is AccessControl {
     function member_Status(uint256 id) internal view returns (int256) {
         uint256 s_period = period();
         MemberData memory member = s_members_id[id];
-        int256 periods = int256(s_period) - int256(member.LatestPeriod);
+        int256 periods = int64(member.LatestPeriod) - int256(s_period);
         return periods;
     }
 
@@ -470,7 +504,7 @@ emergencyWithdraw()
     function setTurnOrder(uint256 item) internal {
         for (uint256 index = item; index > membersId.length - 1; index++) {
             membersId[index] = membersId[index + 1];
-            s_members_turn[membersId[index + 1]] = index + 1;
+            // s_members_turn[membersId[index + 1]] = index + 1;
         }
         membersId.pop();
     }
@@ -506,11 +540,7 @@ emergencyWithdraw()
     function is_myTurn(
         uint256 id
     ) internal view Member_Status(id) returns (bool) {
-        MemberData memory member = s_members_id[id];
         uint256 turn = s_members_turn[id];
-        if (member.claim == true) {
-            revert Natillera_Member_already_claim(msg.sender);
-        }
         uint256 s_period = period();
         bool ismyturn = false;
         if (s_period >= (s_periods_claim * turn)) {
@@ -550,7 +580,8 @@ emergencyWithdraw()
             uint256,
             address,
             uint256,
-            uint256[] memory
+            uint256[] memory,
+            uint64
         )
     {
         return (
@@ -561,7 +592,8 @@ emergencyWithdraw()
             s_time,
             s_moneyAddr,
             uint256(s_natillera_status),
-            membersId
+            membersId,
+            members_status()
         );
     }
     /**
