@@ -2,6 +2,8 @@
 
 pragma solidity ^0.8.25;
 
+import {console} from "forge-std/console.sol";
+
 // Layout of Contract:
 // version
 // imports
@@ -293,13 +295,27 @@ contract aur is AccessControl, ReentrancyGuard {
             //check if all the memeber are active, if not it means that they will be pending money
             if ((ActiveMembers != s_total_member)) {
                 //We don't have enough to pay
-                uint256 pendingMoney = (s_amount *
+                console.log(
+                    "[DBG] ActiveMembers=",
+                    uint256(ActiveMembers),
+                    "s_total=",
+                    s_total_member
+                );
+                console.log("[DBG] amountColleted=", amountColleted);
+                console.log(
+                    "[DBG] s_amount*colleted*periods=",
+                    s_amount * amountColleted * s_periods_claim
+                );
+                console.log(
+                    "[DBG] s_amount*total*periods=",
+                    s_amount * s_total_member * s_periods_claim
+                );
+                uint256 pendingMoney = ((s_amount *
                     s_total_member *
-                    s_periods_claim) -
-                    (s_amount * amountColleted * s_periods_claim);
+                    s_periods_claim) * 1 ether) - (amountColleted);
                 member.pendingClaim = pendingMoney;
             }
-            amountToWithdraw = (s_amount * amountColleted * s_periods_claim);
+            amountToWithdraw = amountColleted;
         } else {
             uint256 withdrawPending = member.pendingClaim;
 
@@ -435,14 +451,17 @@ contract aur is AccessControl, ReentrancyGuard {
     ) internal view returns (uint256, uint256) {
         uint256 total_Collated;
         uint256 total_Collated_Late;
+        int64 startIndex = ((int64(turn) * int16(s_periods_claim)) - 1) + 1;
+        int64 endIndex = (startIndex - (int16(s_periods_claim) - 1)) - 1;
 
-        for (
-            uint64 index = turn * s_periods_claim;
-            index >= (turn * s_periods_claim) - s_periods_claim + 1;
-            index--
-        ) {
-            total_Collated += s_amount_colleted[index];
-            total_Collated_Late += s_amount_late_colleted[index];
+        console.log("[DBG] turn=", uint256(turn));
+        console.log("[DBG] periods=", uint256(s_periods_claim));
+        console.log("[DBG] startIndex=", uint256(uint64(startIndex)));
+        console.log("[DBG] endIndex=", uint256(uint64(endIndex)));
+        for (int64 index = startIndex; index >= endIndex; index--) {
+            console.log("[DBG] loop index=", uint256(uint64(index)));
+            total_Collated += s_amount_colleted[uint64(index)];
+            total_Collated_Late += s_amount_late_colleted[uint64(index)];
         }
         return (total_Collated, total_Collated_Late);
     }
