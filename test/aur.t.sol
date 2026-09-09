@@ -709,7 +709,7 @@ contract aurTest is Test {
         aurContract.claim_myTurn(1);
     }
     /**
-        @dev Test is_myTurn_ext reverts for a member that already claimed
+        @dev Test claiming the pending money works
      */
     function test_is_myTurn_AlreadyClaimedPending() public {
         _addMemberAndApprove(1, member1, 60 ether);
@@ -784,6 +784,175 @@ contract aurTest is Test {
         _logMemberState(1, "MEMBER AFTER CLAIM");
     }
     /**
+        @dev Test claimin pending monet twice
+     */
+    function test_is_myTurn_AlreadyClaimedPendingx2() public {
+        _addMemberAndApprove(1, member1, 60 ether);
+        _addMemberAndApprove(2, member2, 60 ether);
+        _addMemberAndApprove(3, member3, 60 ether);
+        // =========================
+        // BEFORE DEPOSIT
+        // =========================
+
+        _logBalances("BEFORE DEPOSIT");
+        _logMemberState(1, "MEMBER BEFORE DEPOSIT");
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+        // =========================
+        // AFTER DEPOSIT
+        // =========================
+
+        _logBalances("AFTER DEPOSIT");
+        _logMemberState(1, "MEMBER AFTER DEPOSIT");
+        // turn 1, periods_claim 3 -> turn window is period < 3
+        vm.warp(block.timestamp + 92 days); // period 3
+        // =========================
+        // BEFORE CLAIM
+        // =========================
+
+        _logMemberState(1, "BEFORE CLAIM");
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        // =========================
+        // AFTER CLAIM
+        // =========================
+
+        _logBalances("AFTER CLAIM");
+        _logMemberState(1, "MEMBER AFTER CLAIM");
+
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+
+        vm.warp(block.timestamp + 92 days); // period 6
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+        // =========================
+        // AFTER CLAIM
+        // =========================
+
+        _logBalances("AFTER CLAIM");
+        _logMemberState(1, "MEMBER AFTER CLAIM");
+        vm.warp(block.timestamp + 2 days); // period 6
+
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+        _logBalances("AFTER CLAIMx2");
+        _logMemberState(1, "MEMBER AFTER CLAIMx2");
+    }
+    /**
+        @dev Test claiming revert when pendign is 0 and try to claim
+     */
+    function test_is_myTurn_AlreadyClaimedPendingRevert() public {
+        _addMemberAndApprove(1, member1, 60 ether);
+        _addMemberAndApprove(2, member2, 60 ether);
+        _addMemberAndApprove(3, member3, 60 ether);
+        // =========================
+        // BEFORE DEPOSIT
+        // =========================
+
+        _logBalances("BEFORE DEPOSIT");
+        _logMemberState(1, "MEMBER BEFORE DEPOSIT");
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+        // =========================
+        // AFTER DEPOSIT
+        // =========================
+
+        _logBalances("AFTER DEPOSIT");
+        _logMemberState(1, "MEMBER AFTER DEPOSIT");
+        // turn 1, periods_claim 3 -> turn window is period < 3
+        vm.warp(block.timestamp + 92 days); // period 3
+        // =========================
+        // BEFORE CLAIM
+        // =========================
+
+        _logMemberState(1, "BEFORE CLAIM");
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        // =========================
+        // AFTER CLAIM
+        // =========================
+
+        _logBalances("AFTER CLAIM");
+        _logMemberState(1, "MEMBER AFTER CLAIM");
+
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+
+        vm.warp(block.timestamp + 92 days); // period 6
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+        // =========================
+        // AFTER CLAIM
+        // =========================
+
+        _logBalances("AFTER CLAIM");
+        _logMemberState(1, "MEMBER AFTER CLAIM");
+        vm.warp(block.timestamp + 2 days); // period 6
+
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Member_already_claim.selector,
+                member1
+            )
+        );
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+    }
+    /**
         @dev Test that claim_myTurn reverts when the member is late
      */
     function test_claim_myTurn_LateReverts() public {
@@ -847,6 +1016,376 @@ contract aurTest is Test {
         // Before start, s_time = 0 -> period is huge, but is_myTurn uses it
         // We just verify the call does not revert for a fresh member
         bool turn = aurContract.is_myTurn_ext(1);
-        assertTrue(turn);
+        assertFalse(turn);
+    }
+
+    //////////////////////////
+    ////// GETPERIOD FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test that GetPeriod returns 0 right after the natillera starts
+     */
+    function test_GetPeriod_ZeroAtStart() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // No time has passed -> period 0
+        assertEq(aurContract.GetPeriod(), 0);
+    }
+    /**
+        @dev Test that GetPeriod increments by 1 for each full 30 day period
+     */
+    function test_GetPeriod_AfterWarp() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // Advance 30 days -> period 1
+        vm.warp(block.timestamp + 30 days);
+        assertEq(aurContract.GetPeriod(), 1);
+
+        // Advance another 30 days -> period 2
+        vm.warp(block.timestamp + 30 days);
+        assertEq(aurContract.GetPeriod(), 2);
+
+        // Advance 29 days (not a full period) -> still period 2
+        vm.warp(block.timestamp + 29 days);
+        assertEq(aurContract.GetPeriod(), 2);
+    }
+
+    //////////////////////////
+    ////// GET_MEMBER_STATUS FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test that Get_member_Status returns 0 for a member up to date
+     */
+    function test_Get_member_Status_UpToDate() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // Deposit once -> LatestPeriod 1, current period 0 -> status 1
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        assertEq(aurContract.Get_member_Status(1), 1);
+    }
+    /**
+        @dev Test that Get_member_Status returns a negative value when late
+     */
+    function test_Get_member_Status_Late() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // Advance 2 periods without depositing -> member is late by 2
+        vm.warp(block.timestamp + 60 days);
+        assertEq(aurContract.Get_member_Status(1), -2);
+    }
+
+    //////////////////////////
+    ////// UPDATEMEMBER FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test that updateMember reverts when the caller is not the member's SmartContract
+     */
+    function test_updateMember_NotSmartContractReverts() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+
+        // member2 is not the SmartContract of member1 -> revert
+        vm.prank(member2);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Wallet__SpenderNotValid.selector,
+                member2
+            )
+        );
+        aurContract.updateMember(1, member2);
+    }
+    /**
+        @dev Test that updateMember reverts when the new address is zero
+     */
+    function test_updateMember_ZeroAddressReverts() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+
+        vm.prank(member1);
+        vm.expectRevert(abi.encodeWithSelector(aur.Wallet_CantBeZero.selector));
+        aurContract.updateMember(1, address(0));
+    }
+    /**
+        @dev Test that updateMember updates the member address and roles
+     */
+    function test_updateMember_Effects() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+
+        // member1 is the SmartContract, updates its own address to member2
+        vm.prank(member1);
+        aurContract.updateMember(1, member2);
+
+        (aur.MemberData memory member, , ) = aurContract.getdataMember(1);
+        assertEq(member.addr, address(member2));
+
+        // Old address should no longer have the role, new one should
+        assertFalse(aurContract.hasRole(aurContract.MEMBER_ROLE(), member1));
+        assertTrue(aurContract.hasRole(aurContract.MEMBER_ROLE(), member2));
+    }
+
+    //////////////////////////
+    ////// DELETEMEMBER FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test that deleteMember reverts when called by a non-member
+     */
+    function test_deleteMember_OnlyMember() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                NoMember,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(NoMember);
+        aurContract.deleteMember(1);
+    }
+
+    //////////////////////////
+    ////// CHANGETURN FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Helper to add 3 members WITHOUT starting the natillera.
+        @notice ChangeTurn and DeleteMember use the Natillera_Status_Started modifier,
+        which reverts when the natillera IS started, so these tests must run in SETTING state.
+     */
+    function _setupThreeMembers() internal {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+        vm.prank(member1);
+        aurContract.addMember(2, member2, member2);
+        vm.prank(member1);
+        aurContract.addMember(3, member3, member3);
+    }
+    /**
+        @dev Test that ChangeTurn reverts when the member does not exist
+     */
+    function test_ChangeTurn_NonExistentReverts() public {
+        _setupThreeMembers();
+
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_MemberDoesNotExist.selector,
+                99
+            )
+        );
+        aurContract.ChangeTurn(99, 2);
+    }
+    /**
+        @dev Test that ChangeTurn reverts when the new turn is invalid (0 or out of range)
+     */
+    function test_ChangeTurn_InvalidTurnReverts() public {
+        _setupThreeMembers();
+
+        // newTurn 0
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_InvalidTurn.selector,
+                uint256(0)
+            )
+        );
+        aurContract.ChangeTurn(1, 0);
+
+        // newTurn greater than members length (3)
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_InvalidTurn.selector,
+                uint256(4)
+            )
+        );
+        aurContract.ChangeTurn(1, 4);
+    }
+    /**
+        @dev Test that ChangeTurn moves a member forward in the turn order
+     */
+    function test_ChangeTurn_MoveForward() public {
+        _setupThreeMembers();
+
+        // member1 (turn 1) moves to turn 3
+        vm.prank(member1);
+        aurContract.ChangeTurn(1, 3);
+
+        (, uint256 turn1, ) = aurContract.getdataMember(1);
+        (, uint256 turn2, ) = aurContract.getdataMember(2);
+        (, uint256 turn3, ) = aurContract.getdataMember(3);
+
+        assertEq(turn1, 3);
+        assertEq(turn2, 1);
+        assertEq(turn3, 2);
+    }
+    /**
+        @dev Test that ChangeTurn moves a member backward in the turn order
+     */
+    function test_ChangeTurn_MoveBackward() public {
+        _setupThreeMembers();
+
+        // member3 (turn 3) moves to turn 1
+        vm.prank(member1);
+        aurContract.ChangeTurn(3, 1);
+
+        (, uint256 turn1, ) = aurContract.getdataMember(1);
+        (, uint256 turn2, ) = aurContract.getdataMember(2);
+        (, uint256 turn3, ) = aurContract.getdataMember(3);
+
+        assertEq(turn1, 2);
+        assertEq(turn2, 3);
+        assertEq(turn3, 1);
+    }
+    /**
+        @dev Test that ChangeTurn does nothing when the turn is unchanged
+     */
+    function test_ChangeTurn_SameTurnNoop() public {
+        _setupThreeMembers();
+
+        vm.prank(member1);
+        aurContract.ChangeTurn(1, 1);
+
+        (, uint256 turn1, ) = aurContract.getdataMember(1);
+        assertEq(turn1, 1);
+    }
+
+    //////////////////////////
+    ////// DELETEMEMBER (TURN) FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test that DeleteMember reverts when the member does not exist
+     */
+    function test_DeleteMember_NonExistentReverts() public {
+        _setupThreeMembers();
+
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_MemberDoesNotExist.selector,
+                99
+            )
+        );
+        aurContract.DeleteMember(99);
+    }
+    /**
+        @dev Test that DeleteMember removes the member from the turn order
+     */
+    function test_DeleteMember_Effects() public {
+        _setupThreeMembers();
+
+        // Delete member2 (turn 2)
+        vm.prank(member1);
+        aurContract.DeleteMember(2);
+
+        // member2 turn should be deleted (0)
+        console.log("aqui");
+        console.log("aqui");
+
+        console.log("aqui");
+
+        console.log("aqui");
+
+        (, uint256 turn2, ) = aurContract.getdataMember(2);
+        assertEq(turn2, 0);
+
+        // member3 should have moved to turn 2
+        (, uint256 turn3, ) = aurContract.getdataMember(3);
+        assertEq(turn3, 2);
+
+        // member1 stays at turn 1
+        (, uint256 turn1, ) = aurContract.getdataMember(1);
+        assertEq(turn1, 1);
+    }
+
+    //////////////////////////
+    ////// CLAIM_MYTURN EXTRA COVERAGE ////
+    //////////////////////////
+    /**
+        @dev Test that claim_myTurn transfers the collected amount to the member
+     */
+    function test_claim_myTurn_TransfersBalance() public {
+        _addMemberAndApprove(1, member1, 30 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // member1 deposits 3 times (periods_claim = 3)
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+
+        uint256 balanceBefore = usdc.balanceOf(member1);
+        vm.warp(block.timestamp + 92 days); // period 3 -> turn ready
+
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        // member1 should have received 30 ether (3 deposits x 10 ether)
+        assertEq(usdc.balanceOf(member1), balanceBefore + 30 ether);
+        assertEq(usdc.balanceOf(address(aurContract)), 0);
+    }
+    /**
+        @dev Test that claim_myTurn reverts when the member is late (Member_Status modifier)
+     */
+    function test_claim_myTurn_LateModifierReverts() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // Advance 2 periods without depositing -> member is late
+        vm.warp(block.timestamp + 60 days);
+
+        vm.prank(member1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Member_Status_Late.selector,
+                uint256(1)
+            )
+        );
+        aurContract.claim_myTurn(1);
+    }
+    /**
+        @dev Test that claim_myTurn reverts when the caller is not a member (role check)
+        @notice The Member_Status modifier runs before onlyRole, so the member must be
+        up to date (not late) for the role check to be reached. With periods_claim = 3,
+        being up to date at period 3 requires LatestPeriod >= 4.
+     */
+    function test_claim_myTurn_NonMemberReverts() public {
+        _addMemberAndApprove(1, member1, 50 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // member1 deposits 4 times to stay up to date through period 3
+        for (uint256 i = 0; i < 4; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+
+        vm.warp(block.timestamp + 92 days); // period 3 -> turn ready
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                NoMember,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(NoMember);
+        aurContract.claim_myTurn(1);
     }
 }

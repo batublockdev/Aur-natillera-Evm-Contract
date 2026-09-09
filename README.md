@@ -1,66 +1,147 @@
-## Foundry
+# AUR — Natillera Contract
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+A Solidity smart contract that brings on-chain the most common saving mechanism in
+Latin America: the **natillera**. A group of people saves money together and withdraws
+it in turns, decentralizing the group saving process.
 
-Foundry consists of:
+> ⚠️ **Status:** Work in progress. Not audited. **Do not use in production.**
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+## 📋 Description
 
-## Documentation
+The `aur` contract allows a group of people to:
 
-https://book.getfoundry.sh/
+- **Save** by depositing a fixed amount per period (monthly).
+- **Withdraw** the accumulated money in turns, according to the established order.
+- **Manage** members, turns, and natillera parameters in a decentralized way.
 
-## Usage
+Each member deposits `s_amount` per period. When their turn arrives (after
+`s_periods_claim` periods), they can claim the collected money. If there are inactive
+members (late on payments), the pending money accumulates as `pendingClaim` to be
+claimed later.
 
-### Build
+## 🛠️ Stack
 
-```shell
-$ forge build
+- **Language:** Solidity `^0.8.25`
+- **Framework:** [Foundry](https://book.getfoundry.sh/) (Forge, Cast, Anvil)
+- **Libraries:** OpenZeppelin (AccessControl, SafeERC20, ReentrancyGuard)
+- **Security:** Slither, Echidna (invariant fuzzing)
+
+## 📁 Project Structure
+
+```
+├── src/
+│   └── aur.sol              # Main contract
+├── test/
+│   ├── aur.t.sol            # Test suite (Foundry)
+│   ├── mock/
+│   │   └── ERC20Mock.sol    # Test ERC20 token
+│   └── invariants/
+│       └── AURInvariants.sol # Echidna invariants
+├── script/
+│   └── aurDeploy.s.sol      # Deploy script
+├── foundry.toml             # Foundry configuration
+└── AUDIT_REPORT.md          # Security audit report
 ```
 
-### Test
+## 🚀 Installation
 
-```shell
-$ forge test
+```bash
+# Clone the repo
+git clone <repo-url>
+cd aur-natillera-contract
+
+# Install dependencies (OpenZeppelin)
+forge install
+
+# Build
+forge build
 ```
 
-### Format
+## 🧪 Tests
 
-```shell
-$ forge fmt
+```bash
+# Run all tests
+forge test
+
+# Run a specific test
+forge test --match-test test_constructor_checks -vvv
 ```
 
-### Gas Snapshots
+## 🔍 Security Analysis
 
-```shell
-$ forge snapshot
+### Slither (static analysis)
+
+```bash
+slither .
 ```
 
-### Anvil
+### Echidna (invariant fuzzing)
 
-```shell
-$ anvil
+```bash
+echidna test/invariants/AURInvariants.sol \
+  --contract AURInvariants \
+  --test-mode property \
+  --test-limit 20000
 ```
 
-### Deploy
+> See [`AUDIT_REPORT.md`](./AUDIT_REPORT.md) for the full audit report.
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+## 📜 Main Functions
 
-### Cast
+### Member Management
 
-```shell
-$ cast <subcommand>
-```
+| Function | Description |
+|----------|-------------|
+| `addMember(id, addr, smartContract)` | Adds a member to the natillera |
+| `updateMember(id, newAdr)` | Updates a member's address |
+| `deleteMember(id)` | Deletes a member (⚠️ placeholder) |
+| `DeleteMember(id)` | Removes a member from the turn order |
 
-### Help
+### Deposits & Withdrawals
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+| Function | Description |
+|----------|-------------|
+| `deposit_token(id)` | Deposits the period amount |
+| `claim_myTurn(id)` | Claims the money when it is the member's turn |
+
+### Configuration
+
+| Function | Description |
+|----------|-------------|
+| `changeAmount(newAmount)` | Changes the per-period amount |
+| `changePeriods(newPeriods)` | Changes the periods to claim |
+| `startNatillera()` | Starts the natillera |
+| `ChangeTurn(id, newTurn)` | Moves a member in the turn order |
+
+### Queries (view)
+
+| Function | Description |
+|----------|-------------|
+| `getData()` | General natillera data |
+| `getdataMember(id)` | Data of a specific member |
+| `GetPeriod()` | Current period |
+| `Get_member_Status(id)` | Member payment status |
+| `is_myTurn_ext(id)` | Checks if it is a member's turn |
+
+## 🧠 Turn Model
+
+- Each member has a **turn** (1, 2, 3...).
+- A member can claim when the current period `>= s_periods_claim * turn`.
+- If there are inactive members, the money that could not be collected is stored as
+  `pendingClaim` and claimed on the next turn.
+
+## ⚠️ Known Limitations
+
+- `deleteMember` is a placeholder (does not revoke the role or clean up mappings).
+- `updateMember` has no `onlyRole` (membership theft risk if `SmartContract` is an
+  EOA wallet).
+- Relies on `block.timestamp` to calculate periods.
+- `s_amount_late` is dead code (always returns 0).
+
+## 📄 License
+
+MIT
+
+---
+
+*Developed by [batublockdev](https://github.com/batublockdev).*

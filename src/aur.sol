@@ -68,20 +68,14 @@ contract aur is AccessControl, ReentrancyGuard {
     error Natillera_Wrong_address(address, address);
     error Natillera_Wrong_Doble_id(uint256);
     error Natillera_Wrong_Doble_Address(address);
+    error Natillera_MemberDoesNotExist(uint256);
+    error Natillera_InvalidTurn(uint256);
 
     ////////////////////////////
     ////// TYPE DECLARATIONS ///
     ////////////////////////////
     using SafeERC20 for IERC20;
-    enum MemberStatus {
-        ACTIVE,
-        INACTIVE
-    }
-    enum MemberTurn {
-        WAITING,
-        READY,
-        DONE
-    }
+
     enum NatilleraStatus {
         STARTED,
         PAUSED,
@@ -152,6 +146,11 @@ contract aur is AccessControl, ReentrancyGuard {
         }
         _;
     }
+    /**
+     * @dev This modifier checks that the member is up to date with their payments.
+     * If the member is late (member_Status < 0) it reverts with a custom error.
+     * @param id the id of the member to check
+     */
     modifier Member_Status(uint256 id) {
         int256 periodMember = member_Status(id);
         if (periodMember < 0) {
@@ -168,15 +167,16 @@ contract aur is AccessControl, ReentrancyGuard {
     ////////////////////////////
     ////// CONSTRUCTOR /////////
     ////////////////////////////
-    //asinamos multas o no y cuanto es el porcentaje de multa
-    //tenemos que setear el amount
-    //29/30 =0.999 y el memeber period es 0, es decir casi terminamos el primer periodo y no ha pagado
-    //29/30 =0.999 y el memeber period es 1, es decir aun casi terminamos el primer periodo y esta al dia
-    //Miembros para estar al dia tienen  que estar adelante del periodo si es periodo 0, deben esta 1
-    //si estan periodo 2 y member 0 se esta atrasado 2
-    //Al menos establecer que miembro atrasado no recibe dinero
-    // setear amount and periods to receive each member
-    //we check if in the first periods the payments are not enough we declare  it inative
+
+    /**
+     * @param _moneyAddr the address of the ERC20 token used for deposits
+     * @param _amount the amount of tokens each member must deposit per period
+     * @param _periods_claim the number of periods a member must wait before claiming their turn
+     * @notice Initializes the natillera with the money token, the per-period amount and
+     * the number of periods to claim. Grants the deployer the MEMBER_ROLE.
+     * @dev Reverts if the money address is zero or if the amount/periods are zero.
+     * The contract starts in the SETTING status.
+     */
     constructor(address _moneyAddr, uint256 _amount, uint16 _periods_claim) {
         if (_moneyAddr == address(0)) {
             revert Natillera_Wrong_address(_moneyAddr, address(0));
@@ -257,8 +257,7 @@ contract aur is AccessControl, ReentrancyGuard {
         if (newPeriods == 0) revert Wallet_CantBeZero();
         s_periods_claim = newPeriods;
     }
-    //fix and add rentrancy and cheks so on ..
-    // Need to susbtract pending from total amount late
+
     /**
      * @param id the id of the member claiming their turn
      * @notice this function allows a member to claim the money when it is their turn
@@ -284,35 +283,21 @@ contract aur is AccessControl, ReentrancyGuard {
             }
         }
         //Effects
+        uint64 turn = s_members_turn[id];
         uint256 amountToWithdraw;
         (
             uint256 amountColleted,
             uint256 amountColletedLate
-        ) = collected_forTurn(s_members_turn[id]);
+        ) = collected_forTurn(turn);
 
         if (member.pendingClaim == 0) {
             uint64 ActiveMembers = members_status();
             //check if all the memeber are active, if not it means that they will be pending money
             if ((ActiveMembers != s_total_member)) {
                 //We don't have enough to pay
-                console.log(
-                    "[DBG] ActiveMembers=",
-                    uint256(ActiveMembers),
-                    "s_total=",
-                    s_total_member
-                );
-                console.log("[DBG] amountColleted=", amountColleted);
-                console.log(
-                    "[DBG] s_amount*colleted*periods=",
-                    s_amount * amountColleted * s_periods_claim
-                );
-                console.log(
-                    "[DBG] s_amount*total*periods=",
-                    s_amount * s_total_member * s_periods_claim
-                );
-                uint256 pendingMoney = ((s_amount *
-                    s_total_member *
-                    s_periods_claim) * 1 ether) - (amountColleted);
+                uint256 pendingMoney = (
+                    (s_amount * s_total_member * s_periods_claim)
+                ) - (amountColleted);
                 member.pendingClaim = pendingMoney;
             }
             amountToWithdraw = amountColleted;
@@ -323,9 +308,12 @@ contract aur is AccessControl, ReentrancyGuard {
                 //We don't have enough to pay
                 withdrawPending = amountColletedLate;
                 member.pendingClaim = member.pendingClaim - amountColletedLate;
+                clean_colleted_money_late(turn);
                 //Clean amount colleted late
             } else {
                 //Clean amount colleted late
+                clean_colleted_money_late(turn);
+                member.pendingClaim = 0;
             }
             amountToWithdraw = withdrawPending;
         }
@@ -338,22 +326,46 @@ contract aur is AccessControl, ReentrancyGuard {
 
     /**
      * @param id the id of the member to update
-     * @notice this function is used to update a member
+     * @param newAdr the new address for the member
+     * @notice this function is used to update a member's address
      * @dev this function checks that the caller is the smart contract associated
-     * with the member. Currently it is a placeholder and does not perform any update
+     * with the member. It revokes the role from the old address, updates the
+     * member address and grants the role to the new address.
      */
-    function updateMember(uint256 id) external {
+    function updateMember(uint256 id, address newAdr) external {
         MemberData storage member = s_members_id[id];
         if (member.SmartContract != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
-        //here we need to gant the new one and delete the old address
+        if (newAdr == address(0)) {
+            revert Wallet_CantBeZero();
+        }
+        delete s_members_addr[member.addr];
+        s_members_addr[newAdr] = id;
+        _revokeRole(MEMBER_ROLE, member.addr);
+        member.addr = newAdr;
+        _grantRole(MEMBER_ROLE, newAdr);
     }
     /**
      * @notice this function is used to restart the natillera
      * @dev this function is currently a placeholder and does not perform any action
      */
     function reStart() external {}
+    //we check if the periods have finish and if the majority ahave claim
+    /*function check_Before_reStart() external {
+        if (
+            (((s_periods_claim * 30 days) * s_total_member) + s_time) >
+            (block.timestamp)
+        ) {
+            //revert
+            // we haven't finish yet
+        }
+        uint64 member_who_hadClaim;
+        for (uint256 i = 0; i > membersId.length; i++) {
+            MemberData storage member = s_members_id[i];
+
+        }
+    }*/
 
     /**
      * @param id the id to assign to the new member
@@ -413,16 +425,98 @@ contract aur is AccessControl, ReentrancyGuard {
     //80% thresold
     //80% thresold
     /**
+     * @param id the id of the member to delete
      * @notice this function is used to delete a member
-     * @dev this function is currently a placeholder and does not perform any action
+     * @dev this function revokes the MEMBER_ROLE from the member. Note that the
+     * turn and address mappings are not actually cleared (placeholder logic).
      */
-    function deleteMember() external {
+    function deleteMember(uint256 id) external onlyRole(MEMBER_ROLE) {
         // we need to remove grant role
     }
 
-    ///////////////////////////////
-    ////// INTERNAL FUNCTIONS //////
-    ///////////////////////////////
+    /**
+     * @param id the id of the member whose turn is being changed
+     * @param newTurn the new turn position (1-based) for the member
+     * @notice this function moves a member to a new position in the turn order
+     * @dev this function can only be called when the natillera is NOT started.
+     * It validates the member exists and the new turn is within range, then
+     * shifts the other members accordingly.
+     */
+    function ChangeTurn(
+        uint256 id,
+        uint256 newTurn
+    ) external Natillera_Status_Started onlyRole(MEMBER_ROLE) {
+        uint256 currentTurn = s_members_turn[id];
+
+        if (currentTurn == 0) {
+            revert Natillera_MemberDoesNotExist(id);
+        }
+
+        if (newTurn == 0 || newTurn > membersId.length) {
+            revert Natillera_InvalidTurn(newTurn);
+        }
+
+        if (currentTurn == newTurn) {
+            return;
+        }
+
+        uint256 currentIndex = currentTurn - 1;
+        uint256 newIndex = newTurn - 1;
+
+        // Mover hacia adelante
+        if (newIndex < currentIndex) {
+            for (uint256 i = currentIndex; i > newIndex; i--) {
+                uint256 previousMember = membersId[i - 1];
+
+                membersId[i] = previousMember;
+                s_members_turn[previousMember] = uint64(i + 1);
+            }
+        }
+        // Mover hacia atrás
+        else {
+            for (uint256 i = currentIndex; i < newIndex; i++) {
+                uint256 nextMember = membersId[i + 1];
+
+                membersId[i] = nextMember;
+                s_members_turn[nextMember] = uint64(i + 1);
+            }
+        }
+
+        membersId[newIndex] = id;
+        s_members_turn[id] = uint64(newTurn);
+    }
+    /**
+     * @param id the id of the member to delete
+     * @notice this function deletes a member from the turn order
+     * @dev this function can only be called when the natillera is NOT started.
+     * It removes the member from the membersId array and shifts the remaining
+     * members' turn positions.
+     */
+    function DeleteMember(
+        uint256 id
+    ) external Natillera_Status_Started onlyRole(MEMBER_ROLE) {
+        MemberData storage member = s_members_id[id];
+
+        uint256 item = s_members_turn[id];
+
+        if (item == 0) {
+            revert Natillera_MemberDoesNotExist(id);
+        }
+        for (uint256 index = item; index < membersId.length; index++) {
+            membersId[index - 1] = membersId[index];
+            s_members_turn[membersId[index - 1]] = uint64(index);
+        }
+
+        membersId.pop();
+        delete s_members_addr[member.addr];
+        _revokeRole(MEMBER_ROLE, member.addr);
+        delete s_members_turn[id];
+        delete s_members_id[id];
+    }
+
+    //////////////////////////
+    ////// VIEW FUNCTIONS ////
+    //////////////////////////
 
     //we check member status
     //member no active can't withdraw
@@ -446,6 +540,15 @@ contract aur is AccessControl, ReentrancyGuard {
         }
         return numberActiveMember;
     }
+    /**
+     * @param turn the turn number of the member
+     * @notice this function sums the collected amounts (on time and late) for
+     * the periods that belong to a given turn
+     * @dev this function computes the start and end period indexes for the turn
+     * window and accumulates the collected amounts across those periods
+     * @return total_Collated the total collected on time for the turn
+     * @return total_Collated_Late the total collected late for the turn
+     */
     function collected_forTurn(
         uint64 turn
     ) internal view returns (uint256, uint256) {
@@ -465,6 +568,19 @@ contract aur is AccessControl, ReentrancyGuard {
         }
         return (total_Collated, total_Collated_Late);
     }
+    /**
+     * @param turn the turn number of the member
+     * @notice this function zeroes out the late collected amounts for a turn
+     * @dev this function computes the same period window as collected_forTurn
+     * and resets the late collected amounts to zero
+     */
+    function clean_colleted_money_late(uint64 turn) internal {
+        int64 startIndex = ((int64(turn) * int16(s_periods_claim)) - 1) + 1;
+        int64 endIndex = (startIndex - (int16(s_periods_claim) - 1)) - 1;
+        for (int64 index = startIndex; index >= endIndex; index--) {
+            s_amount_late_colleted[uint64(index)] = 0;
+        }
+    }
 
     /**
      * @param id the id of the member to check
@@ -478,75 +594,6 @@ contract aur is AccessControl, ReentrancyGuard {
         MemberData memory member = s_members_id[id];
         int256 periods = int64(member.LatestPeriod) - int256(s_period);
         return periods;
-    }
-
-    /**
-    This are changes whihc are going to be available during the setting state
-    to restart or start we need to make sure all memeber agree so we need 100% signs
-
-    deleteMember()
-changeRules()
-changeAmount()
-changePeriods()
-changeTurns()
-cancelNatillera()
-emergencyWithdraw() 
-        enum action_id {
-        deleteMember?,
-        changeAmount,
-        changePeriods,
-        changeTurns?,
-        emergencyWithdraw
-    }
-    struct CheckClaim {
-        uint18 Action_identifier;
-        address spender/membertoEliminate/x;
-        uint256 value;
-        uint256 nonce;
-        uint256 deadline;
-    }*/
-
-    //We need a rebase token to check the turns
-    //We need to verify members
-    //Each member will have a turn number 1, 2 , 3 .. and can be apply each 3 periods
-    //so if memeber x has turn 2 we check if we are in period 6 or if already pass that on so he can access to the money
-    //we need a also a track to avoid doble claiming
-    // we need a funtion to restar values like period and claim+
-    //We want this to happen in a especific order because of the birthdays
-    //otherwise we need to add a ramdoness feature can be from chainlink
-    /**
-     * @param item the index from which the turn order will be shifted
-     * @notice this function removes a member from the turn order and shifts
-     * the remaining members one position up
-     * @dev this function is used internally when a member is deleted or changes turn
-     */
-    function setTurnOrder(uint256 item) internal {
-        for (uint256 index = item; index > membersId.length - 1; index++) {
-            membersId[index] = membersId[index + 1];
-            // s_members_turn[membersId[index + 1]] = index + 1;
-        }
-        membersId.pop();
-    }
-    /**
-     * @param id the id of the member whose turn is going to change
-     * @param newTurn the new turn position for the member
-     * @notice this function changes the turn of a member in the order
-     * @dev this function is internal and shifts the turn order accordingly
-     */
-    function changeTurns(uint256 id, uint256 newTurn) internal {
-        uint256 item = s_members_turn[id];
-        item--;
-        setTurnOrder(item);
-    }
-    /**
-     * @param id the id of the member to delete
-     * @notice this function deletes a member from the turn order
-     * @dev this function is internal and removes the member from the order
-     */
-    function DeleteMember(uint256 id) internal {
-        uint256 item = s_members_turn[id];
-        item--;
-        setTurnOrder(item);
     }
 
     /**
@@ -568,9 +615,16 @@ emergencyWithdraw()
         return ismyturn;
     }
 
-    //////////////////////////
-    ////// VIEW FUNCTIONS ////
-    //////////////////////////
+    /**
+     * @notice this function returns the current period of the natillera
+     * @dev this function calculates the number of 30 day periods that have passed
+     * since the natillera started
+     * @return the current period number
+     */
+    function period() internal view returns (uint256) {
+        return (block.timestamp - s_time) / (30 days);
+    }
+
     /**
      * @param id the id of the member to check
      * @notice this function is the external version of is_myTurn
@@ -632,16 +686,18 @@ emergencyWithdraw()
     }
     /**
      * @notice this function returns the current period of the natillera
-     * @dev this function calculates the number of 30 day periods that have passed
-     * since the natillera started
+     * @dev this function is the external getter for the internal period() function
      * @return the current period number
      */
-    function period() internal view returns (uint256) {
-        return (block.timestamp - s_time) / (30 days);
-    }
     function GetPeriod() external view returns (uint256) {
         return (period());
     }
+    /**
+     * @param id the id of the member to check
+     * @notice this function returns the member status (how many periods ahead/behind)
+     * @dev this function is the external getter for the internal member_Status() function
+     * @return the member status as a signed integer
+     */
     function Get_member_Status(uint256 id) external view returns (int256) {
         return member_Status(id);
     }
