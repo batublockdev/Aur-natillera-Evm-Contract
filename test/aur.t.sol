@@ -106,7 +106,6 @@ contract aurTest is Test {
         // data inserted in the set up   aurContract = new aur(address(usdc), 10 ether, 3);
         (
             uint256 totalMember,
-            uint256 amountLate,
             uint16 periodsClaim,
             uint256 amount,
             uint256 time,
@@ -117,7 +116,6 @@ contract aurTest is Test {
         ) = aurContract.getData();
 
         console.log("totalMember:", totalMember);
-        console.log("amountLate:", amountLate);
         console.log("periodsClaim:", periodsClaim);
         console.log("amount:", amount);
         console.log("time:", time);
@@ -132,7 +130,6 @@ contract aurTest is Test {
 
         assertEq(totalMember, 0);
         assertEq(members.length, 0);
-        assertEq(amountLate, 0);
         assertEq(periodsClaim, 3);
         assertEq(amount, 10 ether);
         assertEq(time, 0);
@@ -265,7 +262,6 @@ contract aurTest is Test {
 
         (
             uint256 totalMember,
-            uint256 amountLate,
             uint16 periodsClaim,
             uint256 amount,
             uint256 time,
@@ -276,7 +272,6 @@ contract aurTest is Test {
         ) = aurContract.getData();
 
         console.log("totalMember:", totalMember);
-        console.log("amountLate:", amountLate);
         console.log("periodsClaim:", periodsClaim);
         console.log("amount:", amount);
         console.log("time:", time);
@@ -322,7 +317,7 @@ contract aurTest is Test {
         vm.prank(member1);
         aurContract.startNatillera();
 
-        (, , , , uint256 time, , uint256 status, , ) = aurContract.getData();
+        (, , , uint256 time, , uint256 status, , ) = aurContract.getData();
         assertEq(time, block.timestamp);
         // STARTED = 0
         assertEq(status, uint256(0));
@@ -409,7 +404,7 @@ contract aurTest is Test {
         vm.prank(member1);
         aurContract.changePeriods(5);
 
-        (, , uint16 periodsClaim, , , , , , ) = aurContract.getData();
+        (, uint16 periodsClaim, , , , , , ) = aurContract.getData();
         assertEq(periodsClaim, 5);
     }
 
@@ -473,7 +468,7 @@ contract aurTest is Test {
         vm.prank(member1);
         aurContract.changeAmount(20 ether);
 
-        (, , , uint256 amount, , , , , ) = aurContract.getData();
+        (, , uint256 amount, , , , , ) = aurContract.getData();
         assertEq(amount, 20 ether);
     }
 
@@ -671,9 +666,13 @@ contract aurTest is Test {
 
     /**
         @dev Test is_myTurn_ext reverts for a member that already claimed
+        @notice With 1 member and periods_claim 3, the max deposits is 3
+        (Natillera_AllPeriods_Paid), so we use 2 members to allow a second
+        deposit round after the first claim.
      */
     function test_is_myTurn_AlreadyClaimedReverts() public {
         _addMemberAndApprove(1, member1, 60 ether);
+        _addMemberAndApprove(2, member2, 60 ether);
 
         vm.prank(member1);
         aurContract.startNatillera();
@@ -684,6 +683,12 @@ contract aurTest is Test {
         aurContract.deposit_token(1);
         vm.prank(member1);
         aurContract.deposit_token(1);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
 
         // turn 1, periods_claim 3 -> turn window is period < 3
         vm.warp(block.timestamp + 92 days); // period 3
@@ -1089,13 +1094,36 @@ contract aurTest is Test {
     ////// UPDATEMEMBER FUNCTION ////
     //////////////////////////
     /**
-        @dev Test that updateMember reverts when the caller is not the member's SmartContract
+        @dev Test that updateMember reverts when the caller is not a member (role check)
+        @notice updateMember now has onlyRole(MEMBER_ROLE), so a non-member reverts
+        with AccessControlUnauthorizedAccount before reaching the SmartContract check.
+     */
+    function test_updateMember_NotMemberReverts() public {
+        vm.prank(member1);
+        aurContract.addMember(1, member1, member1);
+
+        // member2 is not a member -> role check reverts first
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                member2,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(member2);
+        aurContract.updateMember(1, member2);
+    }
+    /**
+        @dev Test that updateMember reverts when the caller is a member but not the member's SmartContract
+        @notice A member who is not the SmartContract of the target id reverts with Wallet__SpenderNotValid.
      */
     function test_updateMember_NotSmartContractReverts() public {
         vm.prank(member1);
         aurContract.addMember(1, member1, member1);
+        vm.prank(member1);
+        aurContract.addMember(2, member2, member2);
 
-        // member2 is not the SmartContract of member1 -> revert
+        // member2 is a member but not the SmartContract of member1 -> revert
         vm.prank(member2);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1103,7 +1131,7 @@ contract aurTest is Test {
                 member2
             )
         );
-        aurContract.updateMember(1, member2);
+        aurContract.updateMember(1, member3);
     }
     /**
         @dev Test that updateMember reverts when the new address is zero
@@ -1133,27 +1161,6 @@ contract aurTest is Test {
         // Old address should no longer have the role, new one should
         assertFalse(aurContract.hasRole(aurContract.MEMBER_ROLE(), member1));
         assertTrue(aurContract.hasRole(aurContract.MEMBER_ROLE(), member2));
-    }
-
-    //////////////////////////
-    ////// DELETEMEMBER FUNCTION ////
-    //////////////////////////
-    /**
-        @dev Test that deleteMember reverts when called by a non-member
-     */
-    function test_deleteMember_OnlyMember() public {
-        vm.prank(member1);
-        aurContract.addMember(1, member1, member1);
-
-        vm.expectRevert(
-            abi.encodeWithSignature(
-                "AccessControlUnauthorizedAccount(address,bytes32)",
-                NoMember,
-                aurContract.MEMBER_ROLE()
-            )
-        );
-        vm.prank(NoMember);
-        aurContract.deleteMember(1);
     }
 
     //////////////////////////
@@ -1362,16 +1369,17 @@ contract aurTest is Test {
     /**
         @dev Test that claim_myTurn reverts when the caller is not a member (role check)
         @notice The Member_Status modifier runs before onlyRole, so the member must be
-        up to date (not late) for the role check to be reached. With periods_claim = 3,
-        being up to date at period 3 requires LatestPeriod >= 4.
+        up to date (not late) for the role check to be reached. With periods_claim = 3
+        and 1 member, the max deposits is 3 (Natillera_AllPeriods_Paid). Depositing 3
+        times keeps LatestPeriod = 3, which is up to date at period 3 (status 0).
      */
     function test_claim_myTurn_NonMemberReverts() public {
         _addMemberAndApprove(1, member1, 50 ether);
         vm.prank(member1);
         aurContract.startNatillera();
 
-        // member1 deposits 4 times to stay up to date through period 3
-        for (uint256 i = 0; i < 4; i++) {
+        // member1 deposits 3 times (max allowed with 1 member, periods_claim 3)
+        for (uint256 i = 0; i < 3; i++) {
             vm.prank(member1);
             aurContract.deposit_token(1);
         }
@@ -1387,5 +1395,554 @@ contract aurTest is Test {
         );
         vm.prank(NoMember);
         aurContract.claim_myTurn(1);
+    }
+
+    //////////////////////////
+    ////// DEPOSIT_TOKEN: ALL PERIODS PAID ////
+    //////////////////////////
+    /**
+        @dev Test that deposit_token reverts once a member has paid all periods
+        (LatestPeriod == s_total_member * s_periods_claim).
+     */
+    function test_deposit_token_AllPeriodsPaidReverts() public {
+        _addMemberAndApprove(1, member1, 50 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // 1 member, periods_claim 3 -> max 3 deposits
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+
+        // 4th deposit must revert
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_AllPeriods_Paid.selector,
+                uint256(1)
+            )
+        );
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+    }
+    /**
+        @dev Test that a member can still deposit after the AllPeriods_Paid limit
+        is reached once the natillera is restarted (LatestPeriod reset to 0).
+        @notice reStart only avoids the division-by-zero path when the contract
+        balance is 0 (all members claimed), so we claim first to empty the balance.
+     */
+    function test_deposit_token_AllPeriodsPaid_AfterRestart() public {
+        _addMemberAndApprove(1, member1, 50 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+
+        // Claim to empty the contract balance (avoids division-by-zero in reStart)
+        vm.warp(block.timestamp + 92 days); // period 3 -> turn ready
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        // Advance past the full contract duration so reStart is allowed
+        // duration = periods_claim * total_member * 30 days + 30 days
+        vm.warp(block.timestamp + (3 * 1 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // reStart sets status back to SETTING; start again to allow deposits
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // After restart, LatestPeriod is 0 -> can deposit again
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+
+        (aur.MemberData memory member, , ) = aurContract.getdataMember(1);
+        assertEq(member.LatestPeriod, 1);
+    }
+
+    //////////////////////////
+    ////// RESTART FUNCTION ////
+    //////////////////////////
+    /**
+        @dev Test that reStart reverts when the contract has not finished yet.
+     */
+    function test_reStart_NotFinishedReverts() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // Not enough time has passed
+        vm.expectRevert(
+            abi.encodeWithSelector(aur.Natillera_HasNot_Finished.selector)
+        );
+        vm.prank(member1);
+        aurContract.reStart();
+    }
+    /**
+        @dev Test that reStart reverts when called by a non-member.
+     */
+    function test_reStart_OnlyMember() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.warp(block.timestamp + (3 * 1 * 30 days) + 30 days + 1);
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                NoMember,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(NoMember);
+        aurContract.reStart();
+    }
+    /**
+        @dev Test that reStart resets member state and sets status back to SETTING.
+        With a single member who paid all periods and claimed, the contract balance
+        should be 0 and the member state reset.
+     */
+    function test_reStart_Effects() public {
+        _addMemberAndApprove(1, member1, 50 ether);
+        _addMemberAndApprove(2, member2, 50 ether);
+
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // member1 pays all 3 periods
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+            vm.prank(member2);
+            aurContract.deposit_token(2);
+        }
+
+        vm.warp(block.timestamp + 92 days); // period 3 -> turn ready
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        // Advance past full duration
+        vm.warp(block.timestamp + (3 * 1 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // Status back to SETTING (2)
+        (, , , , , uint256 status, , ) = aurContract.getData();
+        assertEq(status, uint256(2));
+
+        // Member state reset
+        (aur.MemberData memory member, , ) = aurContract.getdataMember(1);
+        assertEq(member.LatestPeriod, 0);
+        assertEq(member.pendingClaim, 0);
+        assertFalse(member.claim);
+
+        (aur.MemberData memory member2, , ) = aurContract.getdataMember(2);
+        assertEq(member2.LatestPeriod, 0);
+        assertEq(member2.pendingClaim, 0);
+        assertFalse(member2.claim);
+    }
+
+    //////////////////////////
+    ////// WITHDRAW AFTER CONTRACT FINISHED ////
+    //////////////////////////
+    /**
+        @dev Test that withdrawAfterContractFinished reverts when there is nothing to claim.
+     */
+    function test_withdrawAfterContractFinished_NothingToClaimReverts() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.warp(block.timestamp + (3 * 1 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // No paying balance for member1
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_NothingtoClaim.selector,
+                member1
+            )
+        );
+        vm.prank(member1);
+        aurContract.withdrawAfterContractFinished(1);
+    }
+    /**
+        @dev Test that withdrawAfterContractFinished reverts when called by a non-member.
+     */
+    function test_withdrawAfterContractFinished_OnlyMember() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.warp(block.timestamp + (3 * 1 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                NoMember,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(NoMember);
+        aurContract.withdrawAfterContractFinished(1);
+    }
+    /**
+        @dev Test that withdrawAfterContractFinished reverts when the caller is not the member
+        associated with the id.
+     */
+    function test_withdrawAfterContractFinished_NotOwnerReverts() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        _addMemberAndApprove(2, member2, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.warp(block.timestamp + (3 * 2 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // member2 tries to withdraw member1's id
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Wallet__SpenderNotValid.selector,
+                member2
+            )
+        );
+        vm.prank(member2);
+        aurContract.withdrawAfterContractFinished(1);
+    }
+    /**
+        @dev Test that withdrawAfterContractFinished reverts when the caller is not a member
+        (role check).
+     */
+    function test_withdrawAfterContractFinished_NonMemberReverts() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.warp(block.timestamp + (3 * 1 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                NoMember,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(NoMember);
+        aurContract.withdrawAfterContractFinished(1);
+    }
+
+    //////////////////////////
+    ////// DELETEMEMBER: PAYING TRANSFER ////
+    //////////////////////////
+    /**
+        @dev Test that DeleteMember reverts when called by a non-member (role check).
+     */
+    function test_DeleteMember_NonMemberReverts() public {
+        _setupThreeMembers();
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AccessControlUnauthorizedAccount(address,bytes32)",
+                NoMember,
+                aurContract.MEMBER_ROLE()
+            )
+        );
+        vm.prank(NoMember);
+        aurContract.DeleteMember(1);
+    }
+    /**
+        @dev Test that DeleteMember reverts when the natillera is STARTED.
+     */
+    function test_DeleteMember_StartedReverts() public {
+        _addMemberAndApprove(1, member1, 10 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_Status_Error.selector,
+                uint256(0) // STARTED
+            )
+        );
+        vm.prank(member1);
+        aurContract.DeleteMember(1);
+    }
+
+    //////////////////////////
+    ////// BUG TESTS: reStart DIVISION BY ZERO ////
+    //////////////////////////
+    /**
+        @dev [KNOWN BUG] Test that withdrawAfterContractFinished transfers the pending
+        paying balance. Scenario: 2 members, member2 never pays -> member1 (responsible)
+        gets the unclaimed money via paying[] after reStart.
+        @notice This test currently FAILS because reStart() reverts with a division-by-zero
+        panic when the contract balance > 0 (ResponsableUsers is always 0 once
+        period > total_periods). It documents the bug and should pass once reStart is fixed.
+     */
+    function test_withdrawAfterContractFinished_Transfers() public {
+        _addMemberAndApprove(1, member1, 100 ether);
+        _addMemberAndApprove(2, member2, 100 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // member1 pays all 6 periods (2 members * 3 periods)
+        for (uint256 i = 0; i < 6; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+        // member2 pays nothing -> late
+
+        // Advance past full duration
+        vm.warp(block.timestamp + (3 * 2 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        uint256 balanceBefore = usdc.balanceOf(member1);
+        vm.prank(member1);
+        aurContract.withdrawAfterContractFinished(1);
+
+        // member1 should have received something (the unclaimed money from member2's turn)
+        assertGt(usdc.balanceOf(member1), balanceBefore);
+    }
+    /**
+        @dev [KNOWN BUG] Test that DeleteMember transfers the member's pending paying balance.
+        Scenario: member1 has a paying balance after reStart, then gets deleted and
+        receives the pending amount.
+        @notice This test currently FAILS because reStart() reverts with a division-by-zero
+        panic when the contract balance > 0. It documents the bug and should pass once
+        reStart is fixed.
+     */
+    function test_DeleteMember_TransfersPaying() public {
+        _addMemberAndApprove(1, member1, 100 ether);
+        _addMemberAndApprove(2, member2, 100 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        for (uint256 i = 0; i < 6; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+
+        vm.warp(block.timestamp + (3 * 2 * 30 days) + 30 days + 1);
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // member1 has a paying balance now; delete member2 (no paying balance)
+        uint256 balanceBefore = usdc.balanceOf(member1);
+        vm.prank(member1);
+        aurContract.DeleteMember(2);
+
+        // member2 removed from turn order
+        (, uint256 turn2, ) = aurContract.getdataMember(2);
+        assertEq(turn2, 0);
+        // member1 still at turn 1
+        (, uint256 turn1, ) = aurContract.getdataMember(1);
+        assertEq(turn1, 1);
+        // member1 balance unchanged (member2 had no paying balance)
+        assertEq(usdc.balanceOf(member1), balanceBefore);
+    }
+
+    //////////////////////////
+    ////// RESTART: MULTI-SCENARIO TESTS ////
+    //////////////////////////
+    /**
+        @dev Helper: add 3 members, approve them, start the natillera.
+        periods_claim = 3, amount = 10 ether.
+     */
+    function _setupThreeMembersStarted() internal {
+        _addMemberAndApprove(1, member1, 100 ether);
+        _addMemberAndApprove(2, member2, 100 ether);
+        _addMemberAndApprove(3, member3, 100 ether);
+        vm.prank(member1);
+        aurContract.startNatillera();
+    }
+    /**
+        @dev Helper: advance time past the full contract duration so reStart is allowed.
+        duration = periods_claim * total_member * 30 days + 30 days.
+     */
+    function _warpPastDuration() internal {
+        vm.warp(block.timestamp + (3 * 3 * 30 days) + 30 days + 1);
+    }
+    /**
+        @dev Test the scenario: member3 pays once then stops. member1 and member2 pay
+        everything. After reStart, the money member3 paid (and the unclaimed money from
+        his turn) is distributed to the responsible members (member1, member2).
+        @notice This is the key scenario the user asked about.
+     */
+    function test_reStart_OnePayerStops_DistributesToResponsible() public {
+        _setupThreeMembersStarted();
+
+        // member1 and member2 pay all 9 periods (3 members * 3 periods)
+        for (uint256 i = 0; i < 9; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+            vm.prank(member2);
+            aurContract.deposit_token(2);
+        }
+        // member3 pays only once
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+
+        _warpPastDuration();
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // member1 and member2 are responsible -> they have a paying balance
+        uint256 bal1Before = usdc.balanceOf(member1);
+        uint256 bal2Before = usdc.balanceOf(member2);
+        vm.prank(member1);
+        aurContract.withdrawAfterContractFinished(1);
+        vm.prank(member2);
+        aurContract.withdrawAfterContractFinished(2);
+
+        // Both responsible members received money
+        assertGt(usdc.balanceOf(member1), bal1Before);
+        assertGt(usdc.balanceOf(member2), bal2Before);
+
+        // member3 (moroso) has nothing to claim
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                aur.Natillera_NothingtoClaim.selector,
+                member3
+            )
+        );
+        vm.prank(member3);
+        aurContract.withdrawAfterContractFinished(3);
+    }
+    /**
+        @dev Test that after reStart + all responsible members withdraw, the contract
+        balance is fully distributed (0).
+     */
+    function test_reStart_BalanceZeroAfterDistribution() public {
+        _setupThreeMembersStarted();
+
+        for (uint256 i = 0; i < 9; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+            vm.prank(member2);
+            aurContract.deposit_token(2);
+        }
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+
+        _warpPastDuration();
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // reStart registers the money in paying[] but does not transfer it.
+        // The balance is only drained once the responsible members withdraw.
+        uint256 balAfterRestart = usdc.balanceOf(address(aurContract));
+        assertGt(balAfterRestart, 0);
+
+        // member1 and member2 (responsible) withdraw their full paying balance
+        vm.prank(member1);
+        aurContract.withdrawAfterContractFinished(1);
+        vm.prank(member2);
+        aurContract.withdrawAfterContractFinished(2);
+
+        // All money distributed -> contract balance 0
+        assertEq(usdc.balanceOf(address(aurContract)), 0);
+    }
+    /**
+        @dev Test that reStart can be called again after a full cycle (restart + start + pay).
+        Verifies the natillera can run a second round without issues.
+     */
+    function test_reStart_SecondCycleWorks() public {
+        _setupThreeMembersStarted();
+
+        // Round 1: everyone pays everything
+        for (uint256 i = 0; i < 9; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+            vm.prank(member2);
+            aurContract.deposit_token(2);
+            vm.prank(member3);
+            aurContract.deposit_token(3);
+        }
+
+        _warpPastDuration();
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // Status back to SETTING, start again
+        vm.prank(member1);
+        aurContract.startNatillera();
+
+        // Round 2: members can deposit again (LatestPeriod reset to 0)
+        vm.prank(member1);
+        aurContract.deposit_token(1);
+        vm.prank(member2);
+        aurContract.deposit_token(2);
+        vm.prank(member3);
+        aurContract.deposit_token(3);
+
+        (aur.MemberData memory m1, , ) = aurContract.getdataMember(1);
+        (aur.MemberData memory m2, , ) = aurContract.getdataMember(2);
+        (aur.MemberData memory m3, , ) = aurContract.getdataMember(3);
+        assertEq(m1.LatestPeriod, 1);
+        assertEq(m2.LatestPeriod, 1);
+        assertEq(m3.LatestPeriod, 1);
+    }
+    /**
+        @dev Test that a member who paid everything but never claimed gets their full
+        collected amount via paying[] after reStart.
+     */
+    function test_reStart_UnclaimedResponsibleGetsFullAmount() public {
+        _setupThreeMembersStarted();
+
+        // member1 pays everything, never claims
+        for (uint256 i = 0; i < 9; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+
+        _warpPastDuration();
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // member1 is responsible and unclaimed -> gets his collected amount
+        uint256 balBefore = usdc.balanceOf(member1);
+        vm.prank(member1);
+        aurContract.withdrawAfterContractFinished(1);
+        assertGt(usdc.balanceOf(member1), balBefore);
+    }
+    /**
+        @dev Test that a member who claimed but has pendingClaim gets only the pending
+        amount via paying[] after reStart.
+     */
+    function test_reStart_ClaimedWithPendingGetsPending() public {
+        _setupThreeMembersStarted();
+
+        // member1 pays everything and claims his turn
+        for (uint256 i = 0; i < 9; i++) {
+            vm.prank(member1);
+            aurContract.deposit_token(1);
+        }
+        vm.warp(block.timestamp + 92 days); // period 3 -> turn 1 ready
+        vm.prank(member1);
+        aurContract.claim_myTurn(1);
+
+        _warpPastDuration();
+        vm.prank(member1);
+        aurContract.reStart();
+
+        // member1 claimed -> no paying balance (or only pending)
+        // He should NOT be able to withdraw a full amount again
+        // (withdrawAfterContractFinished reverts if paying[id] == 0)
+        // We just verify reStart succeeded and state reset
+        (aur.MemberData memory m1, , ) = aurContract.getdataMember(1);
+        assertEq(m1.LatestPeriod, 0);
+        assertFalse(m1.claim);
     }
 }

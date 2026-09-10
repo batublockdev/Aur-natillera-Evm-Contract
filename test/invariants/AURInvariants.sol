@@ -60,7 +60,10 @@ contract AURInvariants {
         (aur.MemberData memory m2, , ) = aurContract.getdataMember(2);
         (aur.MemberData memory m3, , ) = aurContract.getdataMember(3);
         uint256 maxOwed = 10 ether * 3; // amount * periods_claim
-        return m1.pendingClaim <= maxOwed && m2.pendingClaim <= maxOwed && m3.pendingClaim <= maxOwed;
+        return
+            m1.pendingClaim <= maxOwed &&
+            m2.pendingClaim <= maxOwed &&
+            m3.pendingClaim <= maxOwed;
     }
 
     /**
@@ -68,7 +71,7 @@ contract AURInvariants {
      * addMember calls (3 in setup).
      */
     function echidna_member_count_bounded() public view returns (bool) {
-        (uint256 totalMember, , , , , , , , ) = aurContract.getData();
+        (uint256 totalMember, , , , , , , ) = aurContract.getData();
         return totalMember <= 3;
     }
 }

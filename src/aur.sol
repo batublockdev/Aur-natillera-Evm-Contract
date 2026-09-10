@@ -70,6 +70,9 @@ contract aur is AccessControl, ReentrancyGuard {
     error Natillera_Wrong_Doble_Address(address);
     error Natillera_MemberDoesNotExist(uint256);
     error Natillera_InvalidTurn(uint256);
+    error Natillera_AllPeriods_Paid(uint256);
+    error Natillera_NothingtoClaim(address);
+    error Natillera_HasNot_Finished();
 
     ////////////////////////////
     ////// TYPE DECLARATIONS ///
@@ -100,7 +103,6 @@ contract aur is AccessControl, ReentrancyGuard {
     ////// STATE VARIABLES /////
     ////////////////////////////
     uint256 private s_total_member;
-    uint256 private s_amount_late;
     uint16 private s_periods_claim;
     uint256 private s_amount;
     uint256 private s_time;
@@ -110,6 +112,7 @@ contract aur is AccessControl, ReentrancyGuard {
 
     mapping(uint64 period => uint256 colleted) private s_amount_colleted;
     mapping(uint64 period => uint256 colleted) private s_amount_late_colleted;
+    mapping(uint256 id => uint256 amount_to_pay) private paying;
 
     mapping(uint256 => MemberData) private s_members_id;
     mapping(address addr => uint256 id) private s_members_addr;
@@ -209,6 +212,9 @@ contract aur is AccessControl, ReentrancyGuard {
         if (member.addr == address(0)) {
             revert Wallet__SpenderNotValid(msg.sender);
         }
+        if (member.LatestPeriod == (s_total_member * s_periods_claim)) {
+            revert Natillera_AllPeriods_Paid(id);
+        }
 
         if (
             IERC20(s_moneyAddr).allowance(msg.sender, address(this)) < s_amount
@@ -297,10 +303,11 @@ contract aur is AccessControl, ReentrancyGuard {
                 //We don't have enough to pay
                 uint256 pendingMoney = (
                     (s_amount * s_total_member * s_periods_claim)
-                ) - (amountColleted);
+                ) - (amountColleted + amountColletedLate);
                 member.pendingClaim = pendingMoney;
             }
-            amountToWithdraw = amountColleted;
+            amountToWithdraw = (amountColleted + amountColletedLate);
+            clean_colleted_money(turn);
         } else {
             uint256 withdrawPending = member.pendingClaim;
 
@@ -308,11 +315,11 @@ contract aur is AccessControl, ReentrancyGuard {
                 //We don't have enough to pay
                 withdrawPending = amountColletedLate;
                 member.pendingClaim = member.pendingClaim - amountColletedLate;
-                clean_colleted_money_late(turn);
+                clean_colleted_money(turn);
                 //Clean amount colleted late
             } else {
                 //Clean amount colleted late
-                clean_colleted_money_late(turn);
+                clean_colleted_money(turn);
                 member.pendingClaim = 0;
             }
             amountToWithdraw = withdrawPending;
@@ -332,7 +339,10 @@ contract aur is AccessControl, ReentrancyGuard {
      * with the member. It revokes the role from the old address, updates the
      * member address and grants the role to the new address.
      */
-    function updateMember(uint256 id, address newAdr) external {
+    function updateMember(
+        uint256 id,
+        address newAdr
+    ) external onlyRole(MEMBER_ROLE) {
         MemberData storage member = s_members_id[id];
         if (member.SmartContract != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
@@ -350,22 +360,108 @@ contract aur is AccessControl, ReentrancyGuard {
      * @notice this function is used to restart the natillera
      * @dev this function is currently a placeholder and does not perform any action
      */
-    function reStart() external {}
     //we check if the periods have finish and if the majority ahave claim
-    /*function check_Before_reStart() external {
+    function reStart() external onlyRole(MEMBER_ROLE) {
+        //make sure this funtion is not execute in twice
+        //we get the active users number
+        //we check howmuch money is in the contract
+        //we transfert the money to those who hans't claim and they are on point
+        //we imaging a situation where someone is not paying so he's not going to be able to claim
+        // once the time has passed the money which has been collected and belongs
+        // to his trun will be returned to those who were responsbale even if the money belongs
+        // to whose who paid some periods and don't paid anymore, but the contract balance must be 0 after this
         if (
-            (((s_periods_claim * 30 days) * s_total_member) + s_time) >
-            (block.timestamp)
+            ((((s_periods_claim * s_total_member) * 30 days) + s_time) +
+                30 days) > block.timestamp
         ) {
-            //revert
-            // we haven't finish yet
+            revert Natillera_HasNot_Finished();
         }
-        uint64 member_who_hadClaim;
-        for (uint256 i = 0; i > membersId.length; i++) {
-            MemberData storage member = s_members_id[i];
+        uint256 ResponsableUsers = members_status();
+        uint256 UnClaimedMoney;
 
+        uint256 balanceContract = IERC20(s_moneyAddr).balanceOf(address(this));
+        console.log("[reStart] ResponsableUsers=", ResponsableUsers);
+        console.log("[reStart] balanceContract=", balanceContract);
+        if (balanceContract > 0) {
+            for (uint256 index = 0; index < membersId.length; index++) {
+                MemberData memory member = s_members_id[membersId[index]];
+                uint64 turn = s_members_turn[membersId[index]];
+                int256 periodMember = member_Status(membersId[index]);
+
+                if (periodMember >= 0) {
+                    //user on time
+                    //check if he has claimed, if not we transfert
+                    (
+                        uint256 amountColleted,
+                        uint256 amountColletedLate
+                    ) = collected_forTurn(turn);
+                    console.log(
+                        "[reStart]   collected=",
+                        amountColleted,
+                        "late=",
+                        amountColletedLate
+                    );
+
+                    if (member.claim == true && member.pendingClaim > 0) {
+                        // just the pendingmoney
+                        paying[membersId[index]] += amountColletedLate;
+                        UnClaimedMoney += amountColletedLate;
+                    }
+                    if (member.claim == false) {
+                        paying[membersId[index]] += (amountColletedLate +
+                            amountColleted);
+                        UnClaimedMoney += (amountColletedLate + amountColleted);
+                    }
+                }
+            }
+            console.log("[reStart] UnClaimedMoney=", UnClaimedMoney);
+            uint256 moneyToDistribute = (balanceContract - UnClaimedMoney) /
+                ResponsableUsers;
+            console.log("[reStart] moneyToDistribute=", moneyToDistribute);
+            for (uint256 index = 0; index < membersId.length; index++) {
+                int256 periodMember = member_Status(membersId[index]);
+                if (periodMember >= 0) {
+                    //user on time
+                    paying[membersId[index]] += moneyToDistribute;
+                    console.log(
+                        "[reStart]   paying[",
+                        membersId[index],
+                        "]+=",
+                        moneyToDistribute
+                    );
+                    console.log(
+                        "[reStart]   paying[",
+                        paying[membersId[index]],
+                        "]+="
+                    );
+                }
+            }
         }
-    }*/
+        for (uint256 index = 0; index < membersId.length; index++) {
+            MemberData storage member = s_members_id[membersId[index]];
+            uint64 turn = s_members_turn[membersId[index]];
+            clean_colleted_money(turn);
+            member.LatestPeriod = 0;
+            member.pendingClaim = 0;
+            member.claim = false;
+        }
+        s_natillera_status = NatilleraStatus.SETTING;
+    }
+    function withdrawAfterContractFinished(
+        uint256 id
+    ) external onlyRole(MEMBER_ROLE) {
+        MemberData storage member = s_members_id[id];
+        if (member.addr != msg.sender) {
+            revert Wallet__SpenderNotValid(msg.sender);
+        }
+        if (paying[id] == 0) {
+            revert Natillera_NothingtoClaim(msg.sender);
+        }
+        uint256 AmountWithdraw = paying[id];
+        delete paying[id];
+        //Interactions
+        IERC20(s_moneyAddr).safeTransfer(msg.sender, AmountWithdraw);
+    }
 
     /**
      * @param id the id to assign to the new member
@@ -379,7 +475,7 @@ contract aur is AccessControl, ReentrancyGuard {
         uint256 id,
         address addr,
         address smartContract
-    ) external onlyRole(MEMBER_ROLE) {
+    ) external Natillera_Status_Started onlyRole(MEMBER_ROLE) {
         //need to prevent same id twice
         //Checks
         if (id == 0) {
@@ -396,6 +492,8 @@ contract aur is AccessControl, ReentrancyGuard {
         }
         // EFFECTS
         _grantRole(MEMBER_ROLE, addr);
+        _grantRole(MEMBER_ROLE, smartContract);
+
         s_members_id[id] = MemberData({
             id: id,
             addr: addr,
@@ -420,18 +518,6 @@ contract aur is AccessControl, ReentrancyGuard {
     {
         s_time = block.timestamp;
         s_natillera_status = NatilleraStatus.STARTED;
-    }
-
-    //80% thresold
-    //80% thresold
-    /**
-     * @param id the id of the member to delete
-     * @notice this function is used to delete a member
-     * @dev this function revokes the MEMBER_ROLE from the member. Note that the
-     * turn and address mappings are not actually cleared (placeholder logic).
-     */
-    function deleteMember(uint256 id) external onlyRole(MEMBER_ROLE) {
-        // we need to remove grant role
     }
 
     /**
@@ -495,23 +581,27 @@ contract aur is AccessControl, ReentrancyGuard {
     function DeleteMember(
         uint256 id
     ) external Natillera_Status_Started onlyRole(MEMBER_ROLE) {
+        //if user is about to be delete we send the money the have pending, notice that this is just if
+        //the user has finished the first contract reponsibly
+
         MemberData storage member = s_members_id[id];
-
         uint256 item = s_members_turn[id];
-
         if (item == 0) {
             revert Natillera_MemberDoesNotExist(id);
         }
+        uint256 AmountWithdraw = paying[id];
+        delete paying[id];
         for (uint256 index = item; index < membersId.length; index++) {
             membersId[index - 1] = membersId[index];
             s_members_turn[membersId[index - 1]] = uint64(index);
         }
-
         membersId.pop();
         delete s_members_addr[member.addr];
         _revokeRole(MEMBER_ROLE, member.addr);
         delete s_members_turn[id];
         delete s_members_id[id];
+        //Interactions
+        IERC20(s_moneyAddr).safeTransfer(msg.sender, AmountWithdraw);
     }
 
     //////////////////////////
@@ -574,11 +664,12 @@ contract aur is AccessControl, ReentrancyGuard {
      * @dev this function computes the same period window as collected_forTurn
      * and resets the late collected amounts to zero
      */
-    function clean_colleted_money_late(uint64 turn) internal {
+    function clean_colleted_money(uint64 turn) internal {
         int64 startIndex = ((int64(turn) * int16(s_periods_claim)) - 1) + 1;
         int64 endIndex = (startIndex - (int16(s_periods_claim) - 1)) - 1;
         for (int64 index = startIndex; index >= endIndex; index--) {
             s_amount_late_colleted[uint64(index)] = 0;
+            s_amount_colleted[uint64(index)] = 0;
         }
     }
 
@@ -591,6 +682,9 @@ contract aur is AccessControl, ReentrancyGuard {
      */
     function member_Status(uint256 id) internal view returns (int256) {
         uint256 s_period = period();
+        if (period() > (s_periods_claim * s_total_member)) {
+            s_period = (s_periods_claim * s_total_member);
+        }
         MemberData memory member = s_members_id[id];
         int256 periods = int64(member.LatestPeriod) - int256(s_period);
         return periods;
@@ -647,7 +741,6 @@ contract aur is AccessControl, ReentrancyGuard {
         view
         returns (
             uint256,
-            uint256,
             uint16,
             uint256,
             uint256,
@@ -659,7 +752,6 @@ contract aur is AccessControl, ReentrancyGuard {
     {
         return (
             s_total_member,
-            s_amount_late,
             s_periods_claim,
             s_amount,
             s_time,
