@@ -449,7 +449,8 @@ contract aur is AccessControl, ReentrancyGuard {
     }
     function withdrawAfterContractFinished(
         uint256 id
-    ) external onlyRole(MEMBER_ROLE) {
+    ) external onlyRole(MEMBER_ROLE) nonReentrant {
+        //cheks
         MemberData storage member = s_members_id[id];
         if (member.addr != msg.sender) {
             revert Wallet__SpenderNotValid(msg.sender);
@@ -457,6 +458,7 @@ contract aur is AccessControl, ReentrancyGuard {
         if (paying[id] == 0) {
             revert Natillera_NothingtoClaim(msg.sender);
         }
+        //effects
         uint256 AmountWithdraw = paying[id];
         delete paying[id];
         //Interactions
@@ -580,15 +582,16 @@ contract aur is AccessControl, ReentrancyGuard {
      */
     function DeleteMember(
         uint256 id
-    ) external Natillera_Status_Started onlyRole(MEMBER_ROLE) {
+    ) external Natillera_Status_Started onlyRole(MEMBER_ROLE) nonReentrant {
         //if user is about to be delete we send the money the have pending, notice that this is just if
         //the user has finished the first contract reponsibly
-
+        //Cheks
         MemberData storage member = s_members_id[id];
         uint256 item = s_members_turn[id];
         if (item == 0) {
             revert Natillera_MemberDoesNotExist(id);
         }
+        //Efects
         uint256 AmountWithdraw = paying[id];
         delete paying[id];
         for (uint256 index = item; index < membersId.length; index++) {
@@ -645,7 +648,7 @@ contract aur is AccessControl, ReentrancyGuard {
         uint256 total_Collated;
         uint256 total_Collated_Late;
         int64 startIndex = ((int64(turn) * int16(s_periods_claim)) - 1) + 1;
-        int64 endIndex = (startIndex - (int16(s_periods_claim) - 1)) - 1;
+        int64 endIndex = (startIndex - (int16(s_periods_claim) - 1));
 
         console.log("[DBG] turn=", uint256(turn));
         console.log("[DBG] periods=", uint256(s_periods_claim));
